@@ -1,0 +1,12 @@
+# Jerry's Python app - no health monitoring
+FROM python:3.11-alpine
+
+WORKDIR /app
+
+# Install curl for potential health checks
+RUN apk add --no-cache curl
+
+COPY server.py .
+
+EXPOSE 8080
+CMD ["python", "server.py"]

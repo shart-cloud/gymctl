@@ -1,0 +1,93 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-probe-failures
+  title: "Jerry's Failing Health Checks"
+  track: k8s-fundamentals
+  week: 4
+  order: 4
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 100
+
+  description: |
+    Jerry's pods keep restarting due to failed liveness probes.
+    The application takes 60 seconds to start, but the probe is too aggressive.
+
+    Fix the liveness and readiness probes so the pods stay healthy.
+    Consider:
+    - Initial delay before checking
+    - Appropriate timeouts
+    - Failure thresholds
+
+  learningOutcomes:
+    - "Configure appropriate health check parameters"
+    - "Understand liveness vs readiness probes"
+    - "Debug probe-related restarts"
+
+  tags:
+    - probes
+    - health-checks
+    - reliability
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+
+  checks:
+    - name: "Liveness probe has appropriate initial delay"
+      type: jsonpath
+      resource: deployment/jerry-slow-app
+      jsonpath: "{.spec.template.spec.containers[0].livenessProbe.initialDelaySeconds}"
+      operator: greaterThan
+      value: 30
+
+    - name: "Readiness probe configured"
+      type: jsonpath
+      resource: deployment/jerry-slow-app
+      jsonpath: "{.spec.template.spec.containers[0].readinessProbe}"
+      operator: exists
+
+    - name: "No pod restarts after 2 minutes"
+      type: script
+      script: |
+        sleep 120
+        restarts=$(kubectl get pods -l app=jerry-slow-app -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' | tr ' ' '+' | bc)
+        if [ "$restarts" -eq 0 ]; then
+          echo "OK: No pod restarts"
+          exit 0
+        else
+          echo "FAIL: Pods restarted $restarts times"
+          exit 1
+        fi
+      expectExitCode: 0
+
+    - name: "All pods eventually become ready"
+      type: script
+      script: |
+        kubectl wait --for=condition=Ready pods -l app=jerry-slow-app --timeout=180s 2>&1 && echo "OK: All pods ready" || (echo "FAIL: Pods not ready" && exit 1)
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Excellent! Jerry's pods are now stable with proper health checks.
+
+    **Key takeaways:**
+    - initialDelaySeconds: Wait for app startup
+    - periodSeconds: How often to check
+    - failureThreshold: Failures before action
+    - Readiness controls traffic, liveness controls restarts

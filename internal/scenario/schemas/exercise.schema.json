@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string",
+      "const": "Exercise"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name", "title", "track"],
+      "properties": {
+        "name": {"type": "string"},
+        "title": {"type": "string"},
+        "track": {"type": "string"},
+        "week": {"type": "integer"},
+        "order": {"type": "integer"}
+      },
+      "additionalProperties": true
+    },
+    "spec": {
+      "type": "object",
+      "required": ["difficulty", "description", "environment", "checks", "hints"],
+      "properties": {
+        "difficulty": {
+          "type": "string",
+          "enum": ["beginner", "intermediate", "advanced"]
+        },
+        "estimatedTime": {"type": "string"},
+        "points": {"type": "integer"},
+        "description": {"type": "string"},
+        "learningOutcomes": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "tags": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "prerequisites": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "environment": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["docker", "kubernetes", "hybrid"]
+            },
+            "kubernetes": {"type": "object"},
+            "docker": {"type": "object"},
+            "customSetup": {
+              "type": "array",
+              "items": {"type": "object"}
+            }
+          },
+          "additionalProperties": true
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "type"]
+          }
+        },
+        "hints": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["cost"],
+            "properties": {
+              "cost": {"type": "integer"},
+              "file": {"type": "string"},
+              "content": {"type": "string"}
+            },
+            "additionalProperties": true
+          }
+        },
+        "successMessage": {"type": "string"},
+        "nextExercise": {"type": "string"},
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "url"],
+            "properties": {
+              "title": {"type": "string"},
+              "url": {"type": "string", "format": "uri"}
+            }
+          }
+        },
+        "variants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"]
+          }
+        },
+        "variantSelection": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

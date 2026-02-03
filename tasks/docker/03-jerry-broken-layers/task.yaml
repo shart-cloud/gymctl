@@ -1,0 +1,126 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-broken-layers
+  title: "Jerry's Broken Layer Cache"
+  track: docker-fundamentals
+  week: 2
+  order: 2
+
+spec:
+  difficulty: beginner
+  estimatedTime: 15m
+  points: 75
+
+  description: |
+    Every time Jerry changes a line of code, Docker reinstalls all
+    dependencies from scratch. Builds take forever!
+
+    Fix the Dockerfile to use layer caching properly so that dependency
+    installation is cached when only code changes.
+
+  learningOutcomes:
+    - "Understand Docker layer caching"
+    - "Order Dockerfile instructions for optimal caching"
+    - "Separate dependency installation from code copying"
+
+  tags:
+    - dockerfile
+    - optimization
+    - caching
+
+  environment:
+    type: docker
+    docker:
+      copyFiles:
+        - from: setup/Dockerfile.broken
+          to: Dockerfile
+        - from: setup/package.json
+          to: package.json
+        - from: setup/index.js
+          to: index.js
+
+  checks:
+    - name: "package.json copied before npm install"
+      type: script
+      script: |
+        # Check that COPY package.json comes before RUN npm install
+        copy_line=$(grep -n "COPY.*package" Dockerfile | head -1 | cut -d: -f1)
+        npm_line=$(grep -n "RUN.*npm install" Dockerfile | head -1 | cut -d: -f1)
+        if [ -z "$copy_line" ] || [ -z "$npm_line" ]; then
+          echo "Missing COPY package.json or RUN npm install"
+          exit 1
+        fi
+        if [ "$copy_line" -lt "$npm_line" ]; then
+          echo "OK: package.json copied before npm install"
+          exit 0
+        else
+          echo "FAIL: npm install runs before package.json is copied"
+          exit 1
+        fi
+      expectExitCode: 0
+
+    - name: "Source code copied after npm install"
+      type: script
+      script: |
+        # Check that source code COPY comes after npm install
+        npm_line=$(grep -n "RUN.*npm install" Dockerfile | head -1 | cut -d: -f1)
+        src_line=$(grep -n "COPY.*\\.js" Dockerfile | tail -1 | cut -d: -f1)
+        if [ -z "$npm_line" ] || [ -z "$src_line" ]; then
+          echo "Missing npm install or source copy"
+          exit 1
+        fi
+        if [ "$src_line" -gt "$npm_line" ]; then
+          echo "OK: Source copied after npm install"
+          exit 0
+        else
+          echo "FAIL: Source copied before npm install"
+          exit 1
+        fi
+      expectExitCode: 0
+
+    - name: "Image builds successfully"
+      type: script
+      script: "docker build -t jerry-layers-test . 2>&1"
+      expectOutput:
+        contains: "Successfully"
+
+  hints:
+    - cost: 0
+      content: |
+        ## Hint 1: How Docker caching works
+
+        Docker caches each layer. If a layer changes, all subsequent layers
+        are rebuilt. Order instructions from least to most frequently changing.
+
+    - cost: 25
+      content: |
+        ## Hint 2: The pattern
+
+        For Node.js apps:
+        1. Copy package.json first
+        2. Run npm install
+        3. Then copy source code
+
+        This way, npm install is cached unless package.json changes.
+
+    - cost: 50
+      content: |
+        ## Hint 3: The fix
+
+        ```dockerfile
+        COPY package.json .
+        RUN npm install
+        COPY index.js .
+        ```
+
+  successMessage: |
+    Nice! Now code changes won't trigger a full npm install.
+
+    **Key takeaway:** Copy dependency manifests and install dependencies
+    before copying source code to maximize cache hits.
+
+  references:
+    - title: "Dockerfile Best Practices"
+      url: "https://docs.docker.com/develop/develop-images/dockerfile_best-practices/"

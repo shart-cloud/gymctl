@@ -1,0 +1,113 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-broken-syntax
+  title: "Jerry's Broken Dockerfile"
+  track: docker-fundamentals
+  week: 2
+  order: 6
+
+spec:
+  difficulty: beginner
+  estimatedTime: 15m
+  points: 100
+
+  description: |
+    Jerry tried to write a Dockerfile but made several syntax errors.
+    The build fails with multiple issues.
+
+    Fix all the syntax errors so the Dockerfile builds successfully.
+    Watch out for:
+    - Missing line continuations
+    - Duplicate instructions
+    - Incorrect capitalization
+    - Wrong instruction order
+    - Missing dependencies
+
+  learningOutcomes:
+    - "Understand Dockerfile syntax rules"
+    - "Debug common Dockerfile errors"
+    - "Learn proper instruction ordering"
+    - "Master multi-line RUN commands"
+
+  tags:
+    - dockerfile
+    - syntax
+    - debugging
+
+  environment:
+    type: docker
+    docker:
+      copyFiles:
+        - from: setup/Dockerfile.broken
+          to: Dockerfile
+        - from: setup/app/
+          to: app/
+
+  checks:
+    - name: "Dockerfile builds without errors"
+      type: script
+      script: "docker build -t jerry-syntax-test . 2>&1"
+      expectOutput:
+        contains: "Successfully"
+
+    - name: "No duplicate CMD instructions"
+      type: script
+      script: |
+        cmd_count=$(grep -c "^CMD" Dockerfile || true)
+        if [ "$cmd_count" -gt 1 ]; then
+          echo "FAIL: Found $cmd_count CMD instructions (should be 1)"
+          exit 1
+        else
+          echo "OK: Single CMD instruction"
+          exit 0
+        fi
+      expectExitCode: 0
+
+    - name: "RUN commands properly formatted"
+      type: script
+      script: |
+        if docker build -t jerry-syntax-test . 2>&1 | grep -q "dockerfile parse error"; then
+          echo "FAIL: Dockerfile has parse errors"
+          exit 1
+        else
+          echo "OK: Dockerfile parses correctly"
+          exit 0
+        fi
+      expectExitCode: 0
+
+    - name: "Container starts successfully"
+      type: script
+      script: |
+        docker build -t jerry-syntax-test . >/dev/null 2>&1
+        docker run -d --name jerry-test jerry-syntax-test >/dev/null 2>&1
+        sleep 2
+        if docker ps | grep -q jerry-test; then
+          echo "OK: Container is running"
+          docker stop jerry-test >/dev/null 2>&1
+          docker rm jerry-test >/dev/null 2>&1
+          exit 0
+        else
+          echo "FAIL: Container failed to start"
+          docker rm jerry-test >/dev/null 2>&1 || true
+          exit 1
+        fi
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Excellent! Jerry's Dockerfile now builds correctly.
+
+    **Key takeaways:**
+    - Use backslash (\) for multi-line RUN commands
+    - Each Dockerfile can only have one CMD and ENTRYPOINT
+    - Instructions are case-sensitive (FROM not from)
+    - Order matters: USER should come after file operations

@@ -1,0 +1,11 @@
+# Jerry's Node.js Dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy everything and install
+COPY . .
+RUN npm install
+
+EXPOSE 3000
+CMD ["node", "index.js"]

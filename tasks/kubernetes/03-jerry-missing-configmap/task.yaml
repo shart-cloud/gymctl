@@ -1,0 +1,97 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-missing-configmap
+  title: "Jerry's Missing ConfigMap"
+  track: k8s-fundamentals
+  week: 4
+  order: 3
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 100
+
+  description: |
+    Jerry's deployment is stuck in CreateContainerConfigError.
+    The pods are trying to mount a ConfigMap that doesn't exist.
+
+    Create the missing ConfigMap with the correct data so the pods can start.
+    The app expects:
+    - DATABASE_HOST: postgres.database.svc.cluster.local
+    - DATABASE_PORT: 5432
+    - APP_MODE: production
+
+  learningOutcomes:
+    - "Create ConfigMaps from literal values"
+    - "Debug ConfigMap mounting issues"
+    - "Understand pod configuration dependencies"
+
+  tags:
+    - configmap
+    - configuration
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+
+  checks:
+    - name: "ConfigMap exists"
+      type: resource
+      resource: configmap/app-config
+      shouldExist: true
+
+    - name: "ConfigMap has DATABASE_HOST"
+      type: jsonpath
+      resource: configmap/app-config
+      jsonpath: "{.data.DATABASE_HOST}"
+      operator: equals
+      value: "postgres.database.svc.cluster.local"
+
+    - name: "ConfigMap has DATABASE_PORT"
+      type: jsonpath
+      resource: configmap/app-config
+      jsonpath: "{.data.DATABASE_PORT}"
+      operator: equals
+      value: "5432"
+
+    - name: "ConfigMap has APP_MODE"
+      type: jsonpath
+      resource: configmap/app-config
+      jsonpath: "{.data.APP_MODE}"
+      operator: equals
+      value: "production"
+
+    - name: "Pods are running"
+      type: script
+      script: |
+        running=$(kubectl get pods -l app=jerry-config-app -o jsonpath='{.items[*].status.phase}' | grep -o "Running" | wc -l)
+        total=$(kubectl get pods -l app=jerry-config-app -o jsonpath='{.items[*].metadata.name}' | wc -w)
+        if [ "$running" -eq "$total" ] && [ "$total" -gt 0 ]; then
+          echo "OK: All $total pods are running"
+          exit 0
+        else
+          echo "FAIL: Only $running of $total pods are running"
+          exit 1
+        fi
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Great job! Jerry's pods are now running with the correct configuration.
+
+    **Key takeaway:** ConfigMaps decouple configuration from container images.
+    Always create ConfigMaps before deploying pods that depend on them.

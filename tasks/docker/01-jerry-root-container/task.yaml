@@ -1,0 +1,78 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-root-container
+  title: "Jerry's Root Container"
+  track: docker-fundamentals
+  week: 2
+  order: 3
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 100
+
+  description: |
+    Jerry's container runs as root. The security team is unhappy.
+
+    Update the Dockerfile so the container runs as a non-root user
+    while keeping the app working.
+
+  learningOutcomes:
+    - "Understand USER instruction in Dockerfiles"
+    - "Create non-root users for container security"
+    - "Verify apps still work under restricted permissions"
+
+  tags:
+    - dockerfile
+    - security
+
+  environment:
+    type: docker
+    docker:
+      copyFiles:
+        - from: setup/Dockerfile.broken
+          to: Dockerfile
+        - from: setup/app/
+          to: app/
+
+  checks:
+    - name: "Dockerfile uses USER instruction"
+      type: dockerfile
+      path: Dockerfile
+      check: userInstruction
+      operator: exists
+
+    - name: "Image builds successfully"
+      type: script
+      script: "docker build -t jerry-root-test . 2>&1"
+      expectOutput:
+        contains: "Successfully"
+
+    - name: "Container runs as non-root"
+      type: script
+      script: |
+        docker build -t jerry-root-test . >/dev/null 2>&1
+        uid=$(docker run --rm jerry-root-test id -u)
+        if [ "$uid" = "0" ]; then
+          echo "FAIL: running as root (uid=0)"
+          exit 1
+        else
+          echo "OK: running as uid=$uid"
+          exit 0
+        fi
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Great work! Jerry's container now runs as a non-root user.
+
+    **Key takeaway:** Use USER to drop root privileges in containers.

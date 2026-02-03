@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-app
+  namespace: default  # Different namespace!
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend-app
+  template:
+    metadata:
+      labels:
+        app: frontend-app
+    spec:
+      containers:
+      - name: frontend
+        image: busybox:latest
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            echo "Frontend starting..."
+            echo "Configured backend: $BACKEND_URL"
+            while true; do
+              echo "Trying to reach backend at $BACKEND_URL..."
+              if wget -O- -T 5 "$BACKEND_URL/health" 2>/dev/null; then
+                echo "Backend is reachable!"
+              else
+                echo "Cannot reach backend!"
+              fi
+              sleep 30
+            done
+        env:
+        - name: BACKEND_URL
+          value: "http://backend-api:8080"  # Wrong! Missing namespace

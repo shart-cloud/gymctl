@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-api
+  namespace: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend-api
+  template:
+    metadata:
+      labels:
+        app: backend-api
+    spec:
+      containers:
+      - name: api
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            mkdir -p /usr/share/nginx/html
+            echo '{"status":"healthy","service":"backend-api"}' > /usr/share/nginx/html/health
+            echo '{"data":"Backend response from namespace: backend"}' > /usr/share/nginx/html/api
+            nginx -g 'daemon off;'

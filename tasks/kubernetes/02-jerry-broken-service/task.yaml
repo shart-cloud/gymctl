@@ -1,0 +1,87 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-broken-service
+  title: "Jerry's Service Can't Find Pods"
+  track: k8s-fundamentals
+  week: 4
+  order: 2
+
+spec:
+  difficulty: beginner
+  estimatedTime: 15m
+  points: 100
+
+  description: |
+    Jerry created a Service to expose his application, but it's not routing
+    traffic to any pods. The Service shows 0 endpoints.
+
+    Fix the Service selector to match the Pod labels so traffic can flow.
+
+  learningOutcomes:
+    - "Understand how Services use label selectors"
+    - "Debug Service endpoint issues"
+    - "Match Service selectors to Pod labels"
+
+  tags:
+    - service
+    - networking
+    - labels
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+        - setup/service.yaml
+
+  checks:
+    - name: "Service has endpoints"
+      type: script
+      script: |
+        endpoints=$(kubectl get endpoints jerry-app-service -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null)
+        if [ -z "$endpoints" ]; then
+          echo "FAIL: Service has no endpoints"
+          exit 1
+        else
+          echo "OK: Service has endpoints: $endpoints"
+          exit 0
+        fi
+      expectExitCode: 0
+
+    - name: "Service selector matches deployment labels"
+      type: script
+      script: |
+        svc_selector=$(kubectl get svc jerry-app-service -o jsonpath='{.spec.selector.app}')
+        pod_label=$(kubectl get pods -l app=jerry-web -o jsonpath='{.items[0].metadata.labels.app}')
+        if [ "$svc_selector" = "$pod_label" ]; then
+          echo "OK: Service selector matches pod labels"
+          exit 0
+        else
+          echo "FAIL: Service selector doesn't match pod labels"
+          exit 1
+        fi
+      expectExitCode: 0
+
+    - name: "Service is accessible"
+      type: script
+      script: |
+        kubectl run test-pod --image=busybox --rm -it --restart=Never -- wget -O- -T 5 http://jerry-app-service:80 2>&1 | grep -q "Jerry's App" && echo "OK: Service is accessible" || (echo "FAIL: Service not accessible" && exit 1)
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Excellent! The Service now correctly routes to Jerry's pods.
+
+    **Key takeaway:** Services find pods using label selectors.
+    The selector must match the labels on the target pods exactly.

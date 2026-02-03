@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-slow-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: jerry-slow-app
+  template:
+    metadata:
+      labels:
+        app: jerry-slow-app
+    spec:
+      containers:
+      - name: slow-app
+        image: busybox:latest
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            echo "Starting slow application..."
+
+            # Simulate slow startup (60 seconds)
+            sleep 60
+
+            # Create health check file after startup
+            touch /tmp/healthy
+            echo "Application started!"
+
+            # Keep running and respond to health checks
+            while true; do
+              if [ -f /tmp/healthy ]; then
+                echo "App is healthy"
+              else
+                echo "App is unhealthy"
+                exit 1
+              fi
+              sleep 10
+            done
+        livenessProbe:
+          exec:
+            command:
+            - cat
+            - /tmp/healthy
+          initialDelaySeconds: 70  # Fixed: wait for startup
+          periodSeconds: 10
+          timeoutSeconds: 1
+          failureThreshold: 3      # Fixed: more tolerant
+        readinessProbe:           # Added: control traffic
+          exec:
+            command:
+            - cat
+            - /tmp/healthy
+          initialDelaySeconds: 65
+          periodSeconds: 5
+          timeoutSeconds: 1
+          failureThreshold: 1
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"

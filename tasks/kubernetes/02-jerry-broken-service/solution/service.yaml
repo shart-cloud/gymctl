@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jerry-app-service
+spec:
+  selector:
+    app: jerry-web  # Fixed: matches pod labels
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+  type: ClusterIP

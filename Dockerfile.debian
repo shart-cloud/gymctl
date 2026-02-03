@@ -1,0 +1,60 @@
+# Debian-based image with all tools included
+FROM golang:1.21-bookworm AS builder
+
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -o gymctl .
+
+# Runtime image with full tooling
+FROM debian:bookworm-slim
+
+# Install runtime dependencies and useful tools
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    git \
+    vim \
+    bash-completion \
+    docker.io \
+    kubectl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install kind for Kubernetes exercises
+RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 \
+    && chmod +x /usr/local/bin/kind
+
+# Create non-root user with sudo access
+RUN groupadd -g 1000 gymuser && \
+    useradd -m -u 1000 -g gymuser -s /bin/bash gymuser && \
+    echo "gymuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Copy binary and exercises
+COPY --from=builder /build/gymctl /usr/local/bin/gymctl
+COPY --from=builder /build/tasks /usr/share/gymctl/tasks
+
+# Copy entrypoint
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Setup bash completion
+RUN echo "source /etc/bash_completion" >> /home/gymuser/.bashrc && \
+    echo "alias ll='ls -la'" >> /home/gymuser/.bashrc && \
+    echo "export PS1='\[\033[01;32m\]gymctl@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '" >> /home/gymuser/.bashrc
+
+# Create working directories
+RUN mkdir -p /home/gymuser/.gym/workdir && \
+    chown -R gymuser:gymuser /home/gymuser/.gym
+
+USER gymuser
+WORKDIR /home/gymuser
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD []

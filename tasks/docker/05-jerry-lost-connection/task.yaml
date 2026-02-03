@@ -1,0 +1,122 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-lost-connection
+  title: "Jerry's Lost Connection"
+  track: docker-fundamentals
+  week: 3
+  order: 2
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 100
+
+  description: |
+    Jerry's web app can't connect to its Redis cache. He's using
+    `localhost:6379` but it doesn't work in Docker Compose.
+
+    Fix the docker-compose.yml and app configuration so the
+    containers can communicate properly.
+
+  learningOutcomes:
+    - "Understand Docker Compose networking"
+    - "Use service names for container communication"
+    - "Configure environment variables for service discovery"
+
+  tags:
+    - docker-compose
+    - networking
+    - services
+
+  environment:
+    type: docker
+    docker:
+      copyFiles:
+        - from: setup/docker-compose.broken.yml
+          to: docker-compose.yml
+        - from: setup/app/
+          to: app/
+
+  checks:
+    - name: "Services can start"
+      type: script
+      script: "docker compose up -d 2>&1"
+      expectExitCode: 0
+
+    - name: "App connects to Redis"
+      type: script
+      script: |
+        docker compose up -d
+        sleep 3
+        result=$(curl -s http://localhost:8085/test-redis 2>/dev/null || echo "failed")
+        docker compose down
+        if echo "$result" | grep -q "success"; then
+          exit 0
+        else
+          echo "Redis connection failed: $result"
+          exit 1
+        fi
+      expectExitCode: 0
+
+    - name: "Uses service name not localhost"
+      type: file
+      path: docker-compose.yml
+      operator: contains
+      value: "redis"
+
+    - name: "Does not hardcode localhost for Redis"
+      type: script
+      script: "! grep -q 'REDIS_HOST=localhost' docker-compose.yml"
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      content: |
+        ## Hint 1: Docker Compose networking
+
+        In Docker Compose, containers on the same network can reach each
+        other using service names as hostnames.
+
+        If you have a service called `redis`, other containers can connect
+        to it at `redis:6379`.
+
+    - cost: 25
+      content: |
+        ## Hint 2: Environment variables
+
+        Pass the Redis host to your app via environment variables:
+
+        ```yaml
+        services:
+          app:
+            environment:
+              - REDIS_HOST=redis
+        ```
+
+    - cost: 50
+      content: |
+        ## Hint 3: depends_on
+
+        Make sure your app waits for Redis to start:
+
+        ```yaml
+        services:
+          app:
+            depends_on:
+              - redis
+            environment:
+              - REDIS_HOST=redis
+              - REDIS_PORT=6379
+        ```
+
+  successMessage: |
+    Jerry's containers can now talk to each other!
+
+    **Key takeaway:** In Docker Compose, use service names (not localhost
+    or IP addresses) for inter-container communication.
+
+  references:
+    - title: "Docker Compose Networking"
+      url: "https://docs.docker.com/compose/networking/"

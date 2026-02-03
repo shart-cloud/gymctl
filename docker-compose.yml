@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  gymctl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gymctl:latest
+    container_name: gymctl
+    volumes:
+      # Mount Docker socket for Docker exercises
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist user work and progress
+      - gymctl-data:/home/gymuser/.gym
+      # For local development, mount current directory
+      # - .:/workspace:ro
+    environment:
+      # Pass through Docker host if needed
+      - DOCKER_HOST=${DOCKER_HOST:-unix:///var/run/docker.sock}
+      # For Kubernetes exercises that need kubeconfig
+      - KUBECONFIG=/home/gymuser/.gym/kubeconfig
+    networks:
+      - gym-network
+    # Run interactively by default
+    stdin_open: true
+    tty: true
+    # Override entrypoint for interactive shell
+    entrypoint: ["/bin/bash"]
+    command: ["-c", "echo 'Welcome to GymCTL Container!' && echo 'Run: gymctl list' && /bin/bash"]
+
+  # Optional: Docker-in-Docker for isolated Docker exercises
+  dind:
+    image: docker:24-dind
+    container_name: gym-dind
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    volumes:
+      - dind-storage:/var/lib/docker
+    networks:
+      - gym-network
+    profiles:
+      - dind
+
+volumes:
+  gymctl-data:
+    name: gymctl-data
+  dind-storage:
+    name: gym-dind-storage
+
+networks:
+  gym-network:
+    name: gym-network
+    driver: bridge

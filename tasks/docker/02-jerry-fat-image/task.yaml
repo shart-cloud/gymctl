@@ -1,0 +1,110 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-fat-image
+  title: "Jerry's Fat Image"
+  track: docker-fundamentals
+  week: 2
+  order: 1
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 100
+
+  description: |
+    Jerry's Go application image is 850MB! The ops team says it's too big
+    and slowing down deployments.
+
+    Use multi-stage builds to create a smaller production image while
+    keeping the build tools separate.
+
+  learningOutcomes:
+    - "Understand multi-stage Docker builds"
+    - "Separate build dependencies from runtime"
+    - "Reduce Docker image size significantly"
+
+  tags:
+    - dockerfile
+    - optimization
+    - multi-stage
+
+  environment:
+    type: docker
+    docker:
+      copyFiles:
+        - from: setup/Dockerfile.broken
+          to: Dockerfile
+        - from: setup/main.go
+          to: main.go
+        - from: setup/go.mod
+          to: go.mod
+
+  checks:
+    - name: "Dockerfile uses multi-stage build"
+      type: dockerfile
+      path: Dockerfile
+      check: multiStage
+      operator: equals
+      value: "true"
+
+    - name: "Final image uses alpine or scratch"
+      type: dockerfile
+      path: Dockerfile
+      check: baseImage
+      operator: regex
+      value: "(alpine|scratch|distroless)"
+
+    - name: "Image builds successfully"
+      type: script
+      script: "docker build -t jerry-fat-test . 2>&1"
+      expectOutput:
+        contains: "Successfully"
+
+    - name: "Image size under 50MB"
+      type: docker-image
+      image: jerry-fat-test
+      property: size
+      operator: lessThan
+      value: "50MB"
+
+  hints:
+    - cost: 0
+      content: |
+        ## Hint 1: What is multi-stage?
+
+        Multi-stage builds use multiple FROM statements. Each FROM starts a new stage.
+        You can copy artifacts from earlier stages to later ones.
+
+    - cost: 25
+      content: |
+        ## Hint 2: Structure
+
+        ```dockerfile
+        FROM golang:1.21 AS builder
+        # Build your app here
+
+        FROM alpine:3.19
+        # Copy only the binary
+        ```
+
+    - cost: 50
+      content: |
+        ## Hint 3: Copy from builder
+
+        Use `COPY --from=builder /path/to/binary /app/` to copy the compiled
+        binary from the builder stage to the final image.
+
+        Don't forget to set the working directory and make sure the binary
+        has execute permissions.
+
+  successMessage: |
+    Excellent! You've reduced the image from 850MB to under 50MB!
+
+    **Key takeaway:** Multi-stage builds let you use full build tools
+    without shipping them in your production image.
+
+  references:
+    - title: "Docker Multi-stage Builds"
+      url: "https://docs.docker.com/build/building/multi-stage/"

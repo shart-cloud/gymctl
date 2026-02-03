@@ -1,0 +1,11 @@
+# Act configuration for local GitHub Actions testing
+# Use medium size image for better compatibility with most actions
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+-P ubuntu-22.04=catthehacker/ubuntu:act-22.04
+-P ubuntu-20.04=catthehacker/ubuntu:act-20.04
+
+# Use local Docker socket
+--container-daemon-socket -
+
+# Set reasonable defaults
+--rm

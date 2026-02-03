@@ -1,0 +1,86 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-forgot-resources
+  title: "Jerry's Resource Hog"
+  track: k8s-fundamentals
+  week: 4
+  order: 1
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 100
+
+  description: |
+    Jerry deployed a pod with no resource limits.
+    The node is showing memory pressure and other pods are being evicted.
+
+    Fix Jerry's deployment before the cluster becomes unstable.
+
+  learningOutcomes:
+    - "Understand the difference between requests and limits"
+    - "Apply appropriate resource constraints"
+    - "Recognize symptoms of resource exhaustion"
+
+  tags:
+    - resources
+    - scheduling
+    - node-pressure
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/jerry-deployment.yaml
+        - setup/victim-pods.yaml
+      waitFor:
+        - resource: deployment/jerry-app
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "Deployment has resource requests"
+      type: jsonpath
+      resource: deployment/jerry-app
+      jsonpath: "{.spec.template.spec.containers[0].resources.requests.memory}"
+      operator: exists
+
+    - name: "Memory limit is set"
+      type: jsonpath
+      resource: deployment/jerry-app
+      jsonpath: "{.spec.template.spec.containers[0].resources.limits.memory}"
+      operator: regex
+      value: "^[0-9]+(Mi|Gi)$"
+
+    - name: "Memory limit is reasonable"
+      type: jsonpath
+      resource: deployment/jerry-app
+      jsonpath: "{.spec.template.spec.containers[0].resources.limits.memory}"
+      operator: lessThan
+      value: "512Mi"
+      valueType: quantity
+
+    - name: "Deployment is healthy"
+      type: condition
+      resource: deployment/jerry-app
+      condition: Available
+      status: "True"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Great work! Jerry's pod is now a good neighbor.
+
+    **Key takeaway:** Always set resource requests and limits.
+    - Requests guarantee resources for scheduling
+    - Limits prevent runaway resource consumption

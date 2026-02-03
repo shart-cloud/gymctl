@@ -1,0 +1,87 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-wrong-namespace
+  title: "Jerry's Cross-Namespace Confusion"
+  track: k8s-fundamentals
+  week: 4
+  order: 5
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 100
+
+  description: |
+    Jerry deployed his backend service in the 'backend' namespace
+    but his frontend deployment in 'default' can't connect to it.
+
+    Fix the Service reference so the frontend can reach the backend.
+    The backend service is called 'backend-api' in the 'backend' namespace.
+
+  learningOutcomes:
+    - "Understand Kubernetes namespaces"
+    - "Reference services across namespaces"
+    - "Use fully qualified domain names (FQDN)"
+
+  tags:
+    - namespaces
+    - networking
+    - service-discovery
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/namespaces.yaml
+        - setup/backend-deployment.yaml
+        - setup/backend-service.yaml
+        - setup/frontend-deployment.yaml
+
+  checks:
+    - name: "Backend namespace exists"
+      type: resource
+      resource: namespace/backend
+      shouldExist: true
+
+    - name: "Backend service is running"
+      type: script
+      script: |
+        kubectl get svc backend-api -n backend >/dev/null 2>&1 && echo "OK: Backend service exists" || (echo "FAIL: Backend service not found" && exit 1)
+      expectExitCode: 0
+
+    - name: "Frontend uses correct backend URL"
+      type: script
+      script: |
+        backend_url=$(kubectl get deployment frontend-app -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="BACKEND_URL")].value}')
+        if echo "$backend_url" | grep -q "backend-api.backend.svc.cluster.local"; then
+          echo "OK: Frontend uses correct cross-namespace URL"
+          exit 0
+        else
+          echo "FAIL: Frontend backend URL is incorrect: $backend_url"
+          exit 1
+        fi
+      expectExitCode: 0
+
+    - name: "Frontend can reach backend"
+      type: script
+      script: |
+        kubectl run test-pod --image=busybox --rm -it --restart=Never -- wget -O- -T 5 http://backend-api.backend.svc.cluster.local:8080/health 2>&1 | grep -q "healthy" && echo "OK: Backend is reachable" || (echo "FAIL: Cannot reach backend" && exit 1)
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Perfect! Jerry's frontend can now reach the backend across namespaces.
+
+    **Key takeaway:** Cross-namespace service discovery uses:
+    `<service>.<namespace>.svc.cluster.local`

@@ -1,0 +1,123 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-no-healthcheck
+  title: "Jerry's Missing Healthcheck"
+  track: docker-fundamentals
+  week: 3
+  order: 1
+
+spec:
+  difficulty: beginner
+  estimatedTime: 15m
+  points: 75
+
+  description: |
+    Jerry's container keeps getting traffic even when the app inside
+    has crashed. Kubernetes and load balancers can't tell it's unhealthy!
+
+    Add a HEALTHCHECK instruction to the Dockerfile so orchestrators
+    know when the container is actually ready to serve traffic.
+
+  learningOutcomes:
+    - "Understand Docker HEALTHCHECK instruction"
+    - "Configure health check intervals and thresholds"
+    - "Enable orchestrators to detect unhealthy containers"
+
+  tags:
+    - dockerfile
+    - healthcheck
+    - production
+
+  environment:
+    type: docker
+    docker:
+      copyFiles:
+        - from: setup/Dockerfile.broken
+          to: Dockerfile
+        - from: setup/server.py
+          to: server.py
+
+  checks:
+    - name: "Dockerfile has HEALTHCHECK"
+      type: script
+      script: "grep -i 'HEALTHCHECK' Dockerfile"
+      expectExitCode: 0
+
+    - name: "HEALTHCHECK uses curl or wget"
+      type: script
+      script: "grep -izE 'HEALTHCHECK.*curl|HEALTHCHECK.*wget' Dockerfile || grep -A1 'HEALTHCHECK' Dockerfile | grep -E '(curl|wget)'"
+      expectExitCode: 0
+
+    - name: "Container builds and runs"
+      type: script
+      script: |
+        docker build -t jerry-health-test . 2>&1 && \
+        docker run -d --name jerry-health-test-run -p 8083:8080 jerry-health-test && \
+        sleep 2 && \
+        docker rm -f jerry-health-test-run
+      expectExitCode: 0
+
+    - name: "Container reports healthy"
+      type: script
+      script: |
+        docker build -t jerry-health-test . 2>&1
+        docker run -d --name jerry-health-check -p 8084:8080 jerry-health-test
+        sleep 15
+        health=$(docker inspect --format='{{.State.Health.Status}}' jerry-health-check 2>/dev/null || echo "none")
+        docker rm -f jerry-health-check
+        if [ "$health" = "healthy" ]; then
+          echo "Container is healthy"
+          exit 0
+        else
+          echo "Health status: $health"
+          exit 1
+        fi
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      content: |
+        ## Hint 1: HEALTHCHECK syntax
+
+        The HEALTHCHECK instruction tells Docker how to test if your container
+        is still working:
+
+        ```dockerfile
+        HEALTHCHECK CMD <command>
+        ```
+
+    - cost: 25
+      content: |
+        ## Hint 2: Common options
+
+        ```dockerfile
+        HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+          CMD <command>
+        ```
+
+        - `--interval`: Time between checks (default 30s)
+        - `--timeout`: Time to wait for check to succeed
+        - `--retries`: Number of failures before unhealthy
+
+    - cost: 50
+      content: |
+        ## Hint 3: Using curl
+
+        ```dockerfile
+        HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+          CMD curl -f http://localhost:8080/health || exit 1
+        ```
+
+        The `-f` flag makes curl fail on HTTP errors.
+
+  successMessage: |
+    The container now has a proper health check!
+
+    **Key takeaway:** HEALTHCHECK lets orchestrators like Kubernetes
+    and Docker Swarm know when your container is ready for traffic.
+
+  references:
+    - title: "Docker HEALTHCHECK"
+      url: "https://docs.docker.com/engine/reference/builder/#healthcheck"
