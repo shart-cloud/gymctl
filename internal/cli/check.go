@@ -13,7 +13,8 @@ import (
 )
 
 type checkOptions struct {
-	verbose bool
+	verbose   bool
+	noCleanup bool
 }
 
 func newCheckCmd() *cobra.Command {
@@ -23,13 +24,19 @@ func newCheckCmd() *cobra.Command {
 		Short: "Check if the current exercise is solved",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			defer RecoverFromPanic(cmd)
+
 			name := ""
 			if len(args) == 1 {
 				name = args[0]
 			} else {
 				current, err := loadCurrentExercise()
 				if err != nil {
-					return fmt.Errorf("no exercise specified and no current exercise set")
+					return WrapErrorWithHint(
+						fmt.Errorf("no exercise specified and no current exercise set"),
+						"Start an exercise first or specify one",
+						"gymctl start <exercise-name>",
+					)
 				}
 				name = current
 			}
@@ -56,33 +63,68 @@ func newCheckCmd() *cobra.Command {
 				}
 				workDir = resolved
 			}
+			// Show checking header
+			ColorInfo.Fprintf(cmd.OutOrStdout(), "🔍 Checking: %s\n", entry.Exercise.Metadata.Name)
+			fmt.Fprintln(cmd.OutOrStdout())
+
 			results, allPassed := checks.RunExerciseChecks(ctx, entry.Exercise, workDir)
+
+			// Count passed checks
+			passedCount := 0
 			for _, result := range results {
-				status := "FAIL"
 				if result.Passed {
-					status = "OK"
+					passedCount++
 				}
-				if opts.verbose && result.Message != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s - %s\n", status, result.Name, result.Message)
-					continue
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", status, result.Name)
 			}
+
+			// Show progress bar
+			progressBar := ProgressBar(passedCount, len(results), 20)
+			fmt.Fprintln(cmd.OutOrStdout(), progressBar)
+			fmt.Fprintln(cmd.OutOrStdout())
+
+			// Show individual check results
+			for _, result := range results {
+				checkLine := FormatCheckResult(result.Name, result.Passed, "")
+				if opts.verbose && result.Message != "" {
+					checkLine = FormatCheckResult(result.Name, result.Passed, result.Message)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), checkLine)
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout())
 
 			if allPassed {
 				if err := markCompleted(entry.Exercise); err != nil {
 					return err
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), "\nExercise complete.")
+				ColorSuccess.Fprintln(cmd.OutOrStdout(), "🎉 Exercise complete! Well done!")
+
+				// Run cleanup hook if not disabled
+				if !opts.noCleanup {
+					cleanupConfig := &CleanupConfig{
+						AutoClean:       false, // Prompt by default
+						SkipClean:       false,
+						CleanImages:     true,
+						CleanContainers: true,
+						CleanVolumes:    true,
+						Exercise:        entry.Exercise.Metadata.Name,
+					}
+					CleanupHook(cmd, entry.Exercise, cleanupConfig)
+				}
+
 				return nil
 			}
 
-			fmt.Fprintln(cmd.OutOrStdout(), "\nExercise not complete.")
+			ColorWarning.Fprintf(cmd.OutOrStdout(), "⚠ Exercise not complete. %d/%d checks passed.\n", passedCount, len(results))
+			if !opts.verbose {
+				ColorDim.Fprintln(cmd.OutOrStdout(), "Use --verbose flag for detailed error messages.")
+			}
 			return fmt.Errorf("checks failed")
 		},
 	}
 
 	cmd.Flags().BoolVar(&opts.verbose, "verbose", false, "Show check details")
+	cmd.Flags().BoolVar(&opts.noCleanup, "no-cleanup", false, "Skip cleanup after successful check")
 
 	return cmd
 }

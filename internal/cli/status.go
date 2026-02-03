@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -20,7 +21,7 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 			if len(entries) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No exercises found.")
+				ColorWarning.Fprintln(cmd.OutOrStdout(), "No exercises found.")
 				return nil
 			}
 
@@ -48,57 +49,150 @@ func newStatusCmd() *cobra.Command {
 				return ai.Metadata.Name < aj.Metadata.Name
 			})
 
+			// Calculate statistics
 			var totalPoints int
 			var earnedPoints int
 			var completedCount int
+			var inProgressCount int
+			trackStats := make(map[string]struct {
+				total     int
+				completed int
+			})
+
 			for _, entry := range entries {
-				totalPoints += defaultPoints(entry.Exercise.Spec.Points)
-				status := progressFile.Exercises[entry.Exercise.Metadata.Name]
+				exercise := entry.Exercise
+				track := exercise.Metadata.Track
+				stats := trackStats[track]
+				stats.total++
+
+				totalPoints += defaultPoints(exercise.Spec.Points)
+				status := progressFile.Exercises[exercise.Metadata.Name]
 				if status.Status == "completed" {
 					completedCount++
+					stats.completed++
 					if status.Score > 0 {
 						earnedPoints += status.Score
 					}
+				} else if status.Status == "in_progress" {
+					inProgressCount++
 				}
+				trackStats[track] = stats
 			}
 
+			// Print header
+			ColorHeader.Fprintln(cmd.OutOrStdout(), "📊 Progress Overview")
+			fmt.Fprintln(cmd.OutOrStdout())
+
+			// Print exercises by track
 			currentTrack := ""
 			for _, entry := range entries {
 				exercise := entry.Exercise
 				if exercise.Metadata.Track != currentTrack {
 					currentTrack = exercise.Metadata.Track
-					fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", currentTrack)
+					stats := trackStats[currentTrack]
+					fmt.Fprintln(cmd.OutOrStdout())
+					ColorTrack.Fprintf(cmd.OutOrStdout(), "▸ %s ", strings.ToUpper(currentTrack))
+					ColorDim.Fprintf(cmd.OutOrStdout(), "(%d/%d completed)\n", stats.completed, stats.total)
 				}
+
 				status := progressFile.Exercises[exercise.Metadata.Name]
-				statusLabel := "not started"
-				if status.Status == "completed" {
-					statusLabel = "completed"
-				} else if status.Status == "in_progress" {
-					statusLabel = "in progress"
+
+				// Status icon and color
+				statusIcon := FormatStatus(status.Status)
+
+				// Exercise name
+				nameStr := fmt.Sprintf("%s %-27s", statusIcon, exercise.Metadata.Name)
+
+				// Status label with color
+				var statusLabel string
+				switch status.Status {
+				case "completed":
+					statusLabel = ColorSuccess.Sprintf("%-12s", "completed")
+				case "in_progress":
+					statusLabel = ColorWarning.Sprintf("%-12s", "in progress")
+				default:
+					statusLabel = ColorDim.Sprintf("%-12s", "not started")
 				}
-				points := "-"
+
+				// Points display with color
+				var pointsStr string
 				if status.Status == "completed" && status.Score > 0 {
-					points = fmt.Sprintf("%d pts", status.Score)
+					if status.Score == 100 {
+						pointsStr = ColorWarning.Sprintf("⭐ %3d pts", status.Score)
+					} else {
+						pointsStr = ColorProgress.Sprintf("   %3d pts", status.Score)
+					}
+				} else {
+					pointsStr = ColorDim.Sprint("      -   ")
 				}
-				timeSpent := "-"
+
+				// Time display
+				timeStr := ColorDim.Sprint("-")
 				if status.TimeSpent != "" {
-					timeSpent = status.TimeSpent
+					timeStr = ColorTime.Sprint(status.TimeSpent)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "  %-28s %-12s %-8s %s\n",
-					exercise.Metadata.Name,
+
+				fmt.Fprintf(cmd.OutOrStdout(), "  %s %s %s %s\n",
+					nameStr,
 					statusLabel,
-					points,
-					timeSpent,
+					pointsStr,
+					timeStr,
 				)
 			}
 
-			fmt.Fprintln(cmd.OutOrStdout(), "")
-			fmt.Fprintf(cmd.OutOrStdout(), "Overall: %d/%d pts | %d/%d completed\n",
-				earnedPoints,
-				totalPoints,
-				completedCount,
-				len(entries),
-			)
+			// Print summary section
+			fmt.Fprintln(cmd.OutOrStdout())
+			fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("─", 60))
+
+			// Progress bar
+			progressBar := ProgressBar(completedCount, len(entries), 30)
+			ColorBold.Fprint(cmd.OutOrStdout(), "Completion: ")
+			fmt.Fprintln(cmd.OutOrStdout(), progressBar)
+
+			// Points summary
+			ColorBold.Fprint(cmd.OutOrStdout(), "Points:     ")
+			if earnedPoints > 0 {
+				ColorSuccess.Fprintf(cmd.OutOrStdout(), "%d", earnedPoints)
+			} else {
+				fmt.Fprint(cmd.OutOrStdout(), "0")
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), " / %d", totalPoints)
+
+			percentage := 0
+			if totalPoints > 0 {
+				percentage = (earnedPoints * 100) / totalPoints
+			}
+			ColorDim.Fprintf(cmd.OutOrStdout(), " (%d%%)\n", percentage)
+
+			// Status summary
+			ColorBold.Fprint(cmd.OutOrStdout(), "Status:     ")
+			if completedCount > 0 {
+				ColorSuccess.Fprintf(cmd.OutOrStdout(), "%d completed", completedCount)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "0 completed")
+			}
+			if inProgressCount > 0 {
+				fmt.Fprint(cmd.OutOrStdout(), ", ")
+				ColorWarning.Fprintf(cmd.OutOrStdout(), "%d in progress", inProgressCount)
+			}
+			notStarted := len(entries) - completedCount - inProgressCount
+			if notStarted > 0 {
+				fmt.Fprint(cmd.OutOrStdout(), ", ")
+				ColorDim.Fprintf(cmd.OutOrStdout(), "%d not started", notStarted)
+			}
+			fmt.Fprintln(cmd.OutOrStdout())
+
+			// Achievement messages
+			if completedCount == len(entries) {
+				fmt.Fprintln(cmd.OutOrStdout())
+				ColorSuccess.Fprintln(cmd.OutOrStdout(), "🏆 Congratulations! You've completed all exercises!")
+			} else if completedCount >= len(entries)*3/4 {
+				fmt.Fprintln(cmd.OutOrStdout())
+				ColorInfo.Fprintln(cmd.OutOrStdout(), "🎯 Great progress! You're 75% complete!")
+			} else if completedCount == len(entries)/2 {
+				fmt.Fprintln(cmd.OutOrStdout())
+				ColorInfo.Fprintln(cmd.OutOrStdout(), "🌟 Halfway there! Keep going!")
+			}
 
 			return nil
 		},

@@ -27,13 +27,19 @@ func newStartCmd() *cobra.Command {
 		Short: "Start an exercise",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			defer RecoverFromPanic(cmd)
+
 			entries, err := scenario.LoadCatalog(tasksDir)
 			if err != nil {
-				return err
+				return HandleCommandError(cmd, err)
 			}
 			entry, found := scenario.FindByName(entries, args[0])
 			if !found {
-				return fmt.Errorf("exercise not found: %s", args[0])
+				return HandleCommandError(cmd, WrapErrorWithHint(
+					fmt.Errorf("exercise not found: %s", args[0]),
+					"Check the exercise name is correct",
+					"gymctl list",
+				))
 			}
 
 			exercise := entry.Exercise
@@ -68,28 +74,36 @@ func newStartCmd() *cobra.Command {
 						return err
 					}
 					if exists {
-						fmt.Fprintln(cmd.OutOrStdout(), "Cleaning existing kind cluster...")
-						if err := manager.Delete(ctx); err != nil {
+						err = WithSpinner("Cleaning existing kind cluster", func() error {
+							return manager.Delete(ctx)
+						})
+						if err != nil {
 							return err
 						}
 					}
-					fmt.Fprintln(cmd.OutOrStdout(), "Creating kind cluster...")
-					if err := manager.Create(ctx, k8s.KindConfig); err != nil {
+					err = WithSpinner("Creating kind cluster (this may take a minute)", func() error {
+						return manager.Create(ctx, k8s.KindConfig)
+					})
+					if err != nil {
 						return err
 					}
 				}
 
 				manifests := environment.ResolveManifestPaths(entry.Dir, k8s.SetupManifests)
 				if len(manifests) > 0 {
-					fmt.Fprintln(cmd.OutOrStdout(), "Applying setup manifests...")
-					if err := environment.ApplyManifests(ctx, namespace, manifests); err != nil {
+					err = WithSpinner("Applying setup manifests", func() error {
+						return environment.ApplyManifests(ctx, namespace, manifests)
+					})
+					if err != nil {
 						return err
 					}
 				}
 
 				for _, wait := range k8s.WaitFor {
-					fmt.Fprintf(cmd.OutOrStdout(), "Waiting for %s...\n", wait.Resource)
-					if err := environment.WaitForCondition(ctx, namespace, wait.Resource, wait.Condition, wait.Timeout); err != nil {
+					err = WithSpinner(fmt.Sprintf("Waiting for %s", wait.Resource), func() error {
+						return environment.WaitForCondition(ctx, namespace, wait.Resource, wait.Condition, wait.Timeout)
+					})
+					if err != nil {
 						return err
 					}
 				}
@@ -102,8 +116,10 @@ func newStartCmd() *cobra.Command {
 					return err
 				}
 				manager := environment.DockerManager{WorkDir: workDir}
-				fmt.Fprintln(cmd.OutOrStdout(), "Setting up docker environment...")
-				if err := manager.Setup(ctx, entry.Dir, *exercise.Spec.Environment.Docker); err != nil {
+				err = WithSpinner("Setting up docker environment", func() error {
+					return manager.Setup(ctx, entry.Dir, *exercise.Spec.Environment.Docker)
+				})
+				if err != nil {
 					return err
 				}
 			default:
@@ -165,17 +181,30 @@ func newStartCmd() *cobra.Command {
 
 func printExerciseIntro(cmd *cobra.Command, exercise *scenario.Exercise) {
 	out := cmd.OutOrStdout()
+
+	// Print title with color
 	fmt.Fprintln(out, "")
-	fmt.Fprintf(out, "%s\n", exercise.Metadata.Title)
-	fmt.Fprintln(out, strings.Repeat("-", len(exercise.Metadata.Title)))
+	ColorHeader.Fprintln(out, exercise.Metadata.Title)
+	ColorDim.Fprintln(out, strings.Repeat("═", len(exercise.Metadata.Title)))
+
+	// Print metadata
+	ColorInfo.Fprintf(out, "📚 Difficulty: ")
+	fmt.Fprintln(out, DifficultyBadge(exercise.Spec.Difficulty))
+	if exercise.Spec.EstimatedTime != "" {
+		ColorInfo.Fprint(out, "⏱  Estimated Time: ")
+		ColorTime.Fprintln(out, exercise.Spec.EstimatedTime)
+	}
+
 	if exercise.Spec.Description != "" {
+		fmt.Fprintln(out, "")
 		fmt.Fprintln(out, exercise.Spec.Description)
 	}
+
 	if len(exercise.Spec.LearningOutcomes) > 0 {
 		fmt.Fprintln(out, "")
-		fmt.Fprintln(out, "Learning objectives:")
+		ColorBold.Fprintln(out, "📝 Learning Objectives:")
 		for _, item := range exercise.Spec.LearningOutcomes {
-			fmt.Fprintf(out, "- %s\n", item)
+			fmt.Fprintf(out, "  • %s\n", item)
 		}
 	}
 	fmt.Fprintln(out, "")

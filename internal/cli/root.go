@@ -38,8 +38,11 @@ func init() {
 		newCheckCmd(),
 		newHintCmd(),
 		newResetCmd(),
+		newRecoverCmd(),
 		newStatusCmd(),
 		newCleanCmd(),
+		newCleanupCmd(),
 		newDescribeCmd(),
+		newDiagnoseCmd(),
 	)
 }

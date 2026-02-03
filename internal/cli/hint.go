@@ -55,7 +55,7 @@ func newHintCmd() *cobra.Command {
 			status := progressFile.Exercises[entry.Exercise.Metadata.Name]
 			startIndex := status.HintsUsed
 			if startIndex >= len(entry.Exercise.Spec.Hints) {
-				fmt.Fprintln(cmd.OutOrStdout(), "No more hints available.")
+				ColorWarning.Fprintln(cmd.OutOrStdout(), "No more hints available.")
 				return nil
 			}
 
@@ -70,6 +70,7 @@ func newHintCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				ColorInfo.Fprintf(cmd.OutOrStdout(), "%s Hint %d: ", IconHint, i+1)
 				fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(content))
 				fmt.Fprintln(cmd.OutOrStdout(), "")
 			}

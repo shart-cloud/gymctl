@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"gymctl/internal/progress"
 	"gymctl/internal/scenario"
 )
 
@@ -27,9 +28,19 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 
+			// Load progress to show completion status
+			progressPath, err := resolveProgressFile()
+			if err != nil {
+				return err
+			}
+			progressFile, err := progress.Load(progressPath)
+			if err != nil {
+				return err
+			}
+
 			filtered := filterList(entries, opts)
 			if len(filtered) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No exercises found.")
+				ColorWarning.Fprintln(cmd.OutOrStdout(), "No exercises found.")
 				return nil
 			}
 
@@ -48,25 +59,60 @@ func newListCmd() *cobra.Command {
 				return ai.Metadata.Name < aj.Metadata.Name
 			})
 
-			fmt.Fprintln(cmd.OutOrStdout(), "Available exercises:")
+			// Count completed exercises
+			completedCount := 0
+			for _, entry := range filtered {
+				if status, ok := progressFile.Exercises[entry.Exercise.Metadata.Name]; ok && status.Status == "completed" {
+					completedCount++
+				}
+			}
+
+			ColorHeader.Fprintln(cmd.OutOrStdout(), "🎯 Available Exercises")
+			ColorDim.Fprintf(cmd.OutOrStdout(), "%d exercises total, %d completed\n", len(filtered), completedCount)
+
 			currentTrack := ""
 			for _, entry := range filtered {
 				exercise := entry.Exercise
 				if exercise.Metadata.Track != currentTrack {
 					currentTrack = exercise.Metadata.Track
-					fmt.Fprintf(cmd.OutOrStdout(), "\nTRACK: %s\n", currentTrack)
+					fmt.Fprintln(cmd.OutOrStdout())
+					ColorTrack.Fprintf(cmd.OutOrStdout(), "▸ %s\n", strings.ToUpper(currentTrack))
 				}
+
+				// Get status icon
+				status := progressFile.Exercises[exercise.Metadata.Name]
+				statusIcon := FormatStatus(status.Status)
+
 				desc := firstLine(exercise.Spec.Description)
 				estimated := exercise.Spec.EstimatedTime
 				if estimated == "" {
 					estimated = "-"
+				} else {
+					estimated = ColorTime.Sprint(estimated)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "  %-28s [%-12s] %6s  - %s\n",
-					exercise.Metadata.Name,
-					exercise.Spec.Difficulty,
+
+				// Format exercise name with status
+				nameWithStatus := fmt.Sprintf("%s %-27s", statusIcon, exercise.Metadata.Name)
+
+				// Format difficulty with color
+				diffBadge := DifficultyBadge(exercise.Spec.Difficulty)
+
+				// Print the formatted line
+				fmt.Fprintf(cmd.OutOrStdout(), "  %s %s %6s  %s\n",
+					nameWithStatus,
+					diffBadge,
 					estimated,
-					desc,
+					ColorDim.Sprint(desc),
 				)
+			}
+
+			// Add a summary footer
+			fmt.Fprintln(cmd.OutOrStdout())
+			if completedCount == len(filtered) {
+				ColorSuccess.Fprintln(cmd.OutOrStdout(), "🎉 Congratulations! All exercises completed!")
+			} else if completedCount > 0 {
+				progressBar := ProgressBar(completedCount, len(filtered), 20)
+				fmt.Fprintln(cmd.OutOrStdout(), progressBar)
 			}
 
 			return nil
