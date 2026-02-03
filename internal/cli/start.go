@@ -134,8 +134,13 @@ func newStartCmd() *cobra.Command {
 				for _, copySpec := range exercise.Spec.Environment.Docker.CopyFiles {
 					srcPath := filepath.Join(entry.Dir, copySpec.From)
 					dstPath := filepath.Join(workDir, copySpec.To)
-					if err := copyFile(srcPath, dstPath); err != nil {
-						return fmt.Errorf("copy file %s: %w", copySpec.From, err)
+					// Handle both files and directories
+					if strings.HasSuffix(copySpec.From, "/") {
+						// Source ends with /, treat as directory contents
+						srcPath = strings.TrimSuffix(srcPath, "/")
+					}
+					if err := copyPath(srcPath, dstPath); err != nil {
+						return fmt.Errorf("copy %s: %w", copySpec.From, err)
 					}
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), "Exercise files copied to work directory.")
@@ -197,6 +202,40 @@ func markStarted(exercise *scenario.Exercise) error {
 	progressFile.Exercises[exercise.Metadata.Name] = entry
 
 	return progress.Save(path, progressFile)
+}
+
+func copyPath(srcPath, dstPath string) error {
+	// Check if source is a file or directory
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		return err
+	}
+
+	if info.IsDir() {
+		return copyDir(srcPath, dstPath)
+	}
+	return copyFile(srcPath, dstPath)
+}
+
+func copyDir(source string, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relPath, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relPath)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		_, err = entry.Info()
+		if err != nil {
+			return err
+		}
+		return copyFile(path, target)
+	})
 }
 
 func copyFile(srcPath, dstPath string) error {

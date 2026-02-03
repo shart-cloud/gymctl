@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     vim \
     bash-completion \
     docker.io \
+    docker-compose-plugin \
     kubectl \
     && rm -rf /var/lib/apt/lists/*
 

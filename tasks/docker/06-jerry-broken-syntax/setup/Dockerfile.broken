@@ -7,8 +7,8 @@ WORKDIR /app
 
 COPY app/ /app
 
-RUN pip3 install flask==2.0.1
-    pip3 install requests
+RUN pip3 install --break-system-packages flask==2.0.1
+    pip3 install --break-system-packages requests
 
 EXPOSE 8080
 

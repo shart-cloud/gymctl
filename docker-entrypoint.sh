@@ -64,9 +64,39 @@ main() {
             exec gymctl "$@"
         fi
     else
-        # Interactive mode
+        # Interactive mode with gymctl wrapper function
         print_info "Starting interactive shell. Type 'exit' to quit."
-        exec /bin/bash
+
+        # Create a temporary bashrc with gymctl wrapper
+        cat > /tmp/.bashrc_gymctl << 'EOF'
+# Source system bashrc if it exists
+[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc
+
+# GymCTL wrapper function to handle directory changes
+gymctl() {
+    if [ "$1" = "start" ] && [ -n "$2" ]; then
+        # Run the actual gymctl start command
+        command gymctl "$@"
+
+        # If successful, cd to the work directory
+        if [ $? -eq 0 ]; then
+            WORKDIR="/home/gymuser/.gym/workdir/$2"
+            if [ -d "$WORKDIR" ]; then
+                cd "$WORKDIR"
+                echo "Changed to work directory: $WORKDIR"
+            fi
+        fi
+    else
+        # For all other commands, run normally
+        command gymctl "$@"
+    fi
+}
+
+# Export the function
+export -f gymctl
+EOF
+
+        exec /bin/bash --rcfile /tmp/.bashrc_gymctl
     fi
 }
 

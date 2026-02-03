@@ -22,6 +22,7 @@ FROM alpine:3.19
 # Install runtime dependencies
 RUN apk add --no-cache \
     docker-cli \
+    docker-cli-compose \
     kubectl \
     curl \
     bash \

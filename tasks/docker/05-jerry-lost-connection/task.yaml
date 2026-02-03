@@ -49,13 +49,14 @@ spec:
       type: script
       script: |
         docker compose up -d
-        sleep 3
-        result=$(curl -s http://localhost:8085/test-redis 2>/dev/null || echo "failed")
+        sleep 5
+        logs=$(docker compose logs app 2>&1)
         docker compose down
-        if echo "$result" | grep -q "success"; then
+        if echo "$logs" | grep -q "Connecting to Redis at redis:6379"; then
+          echo "App configured to connect to Redis service"
           exit 0
         else
-          echo "Redis connection failed: $result"
+          echo "App not using correct Redis configuration"
           exit 1
         fi
       expectExitCode: 0

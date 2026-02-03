@@ -1,8 +1,10 @@
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip install redis flask
+# Handle both old and new Python environments
+RUN pip install --no-cache-dir --break-system-packages redis flask 2>/dev/null || \
+    pip install --no-cache-dir redis flask
 
 COPY app.py .
 

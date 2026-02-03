@@ -7,7 +7,8 @@ services:
     ports:
       - "8085:8080"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       # Use the service name 'redis' instead of localhost
       - REDIS_HOST=redis
@@ -15,4 +16,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
     # No need to expose ports externally unless needed for debugging
