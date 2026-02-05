@@ -29,11 +29,16 @@ check_docker() {
 
 # Initialize gym directory if needed
 init_gym() {
+    # Create directories if they don't exist (ignore errors if already exist)
+    mkdir -p "$HOME/.gym/workdir" 2>/dev/null || true
+
+    # Initialize progress file if it doesn't exist
     if [ ! -f "$HOME/.gym/progress.yaml" ]; then
         print_info "First run detected. Initializing gym environment..."
-        mkdir -p "$HOME/.gym/workdir"
-        echo "version: 1" > "$HOME/.gym/progress.yaml"
-        echo "exercises: {}" >> "$HOME/.gym/progress.yaml"
+        cat > "$HOME/.gym/progress.yaml" << 'YAML'
+version: 1
+exercises: {}
+YAML
     fi
 }
 
