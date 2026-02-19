@@ -2,7 +2,7 @@
 FROM golang:1.22-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git make nvim
+RUN apk add --no-cache git make
 
 WORKDIR /build
 
