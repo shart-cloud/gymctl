@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"gymctl/internal/checks"
+	"gymctl/internal/dialogue"
 	"gymctl/internal/progress"
 	"gymctl/internal/scenario"
 )
@@ -97,6 +98,8 @@ func newCheckCmd() *cobra.Command {
 				if err := markCompleted(entry.Exercise); err != nil {
 					return err
 				}
+				dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(entry.Exercise.Spec.JerryDialog, "onComplete", entry.Exercise.Metadata.Name))
+				fmt.Fprintln(cmd.OutOrStdout())
 				ColorSuccess.Fprintln(cmd.OutOrStdout(), "🎉 Exercise complete! Well done!")
 
 				// Run cleanup hook if not disabled
@@ -115,6 +118,8 @@ func newCheckCmd() *cobra.Command {
 				return nil
 			}
 
+			dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(entry.Exercise.Spec.JerryDialog, "onCheckFail", entry.Exercise.Metadata.Name))
+			fmt.Fprintln(cmd.OutOrStdout())
 			ColorWarning.Fprintf(cmd.OutOrStdout(), "⚠ Exercise not complete. %d/%d checks passed.\n", passedCount, len(results))
 			if !opts.verbose {
 				ColorDim.Fprintln(cmd.OutOrStdout(), "Use --verbose flag for detailed error messages.")
@@ -143,7 +148,20 @@ func markCompleted(exercise *scenario.Exercise) error {
 	entry := progressFile.Exercises[exercise.Metadata.Name]
 	entry.Status = "completed"
 	entry.CompletedAt = time.Now().UTC().Format(time.RFC3339)
-	entry.Score = defaultPoints(exercise.Spec.Points)
+	baseScore := defaultPoints(exercise.Spec.Points)
+	penalty := 0
+	for i := 0; i < entry.HintsUsed && i < len(exercise.Spec.Hints); i++ {
+		penalty += exercise.Spec.Hints[i].Cost
+	}
+	if penalty > baseScore {
+		penalty = baseScore
+	}
+	entry.Score = baseScore - penalty
+	if entry.StartedAt != "" {
+		if t, err := time.Parse(time.RFC3339, entry.StartedAt); err == nil {
+			entry.TimeSpent = formatDuration(time.Since(t).Round(time.Second))
+		}
+	}
 	progressFile.Exercises[exercise.Metadata.Name] = entry
 
 	return progress.Save(path, progressFile)

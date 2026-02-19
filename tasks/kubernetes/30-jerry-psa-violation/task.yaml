@@ -1,0 +1,108 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-psa-violation
+  title: "Jerry's Pod Security Admission Violation"
+  track: k8s-admin
+  week: 4
+  order: 7
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 120
+
+  description: |
+    Jerry deployed his application to the production namespace that has
+    `restricted` Pod Security Admission enforcement. His deployment is being
+    rejected by the admission controller.
+
+    Fix the deployment's securityContext to comply with the restricted
+    security standards without changing the namespace policy.
+
+  learningOutcomes:
+    - "Understand Pod Security Standards enforcement levels"
+    - "Fix pod admission failures by adjusting securityContext"
+    - "Maintain security compliance while enabling application functionality"
+
+  tags:
+    - pod-security-admission
+    - security
+    - troubleshooting
+    - admission-controller
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: production
+      setupManifests:
+        - setup/namespace.yaml
+        - setup/deployment.yaml
+      waitFor:
+        - resource: namespace/production
+          condition: active
+          timeout: 30s
+
+  checks:
+    - name: "Namespace still has restricted enforcement"
+      type: script
+      script: |
+        set -e
+        enforce=$(kubectl get namespace production -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')
+        [ "$enforce" = "restricted" ]
+      expectExitCode: 0
+
+    - name: "Deployment is available"
+      type: condition
+      resource: deployment/jerry-app
+      namespace: production
+      condition: available
+      timeout: 120s
+
+    - name: "Pod is running with compliant security context"
+      type: script
+      script: |
+        set -e
+        # Check that pod is running
+        kubectl get pods -n production -l app=jerry-app --field-selector=status.phase=Running -o name | wc -l | grep -q "^[1-9]"
+
+        # Check key restricted compliance fields
+        pod_name=$(kubectl get pods -n production -l app=jerry-app -o jsonpath='{.items[0].metadata.name}')
+
+        # runAsNonRoot must be true
+        runAsNonRoot=$(kubectl get pod $pod_name -n production -o jsonpath='{.spec.securityContext.runAsNonRoot}')
+        [ "$runAsNonRoot" = "true" ]
+
+        # allowPrivilegeEscalation must be false
+        allowPrivEsc=$(kubectl get pod $pod_name -n production -o jsonpath='{.spec.containers[0].securityContext.allowPrivilegeEscalation}')
+        [ "$allowPrivEsc" = "false" ]
+
+        # capabilities must drop ALL
+        caps=$(kubectl get pod $pod_name -n production -o jsonpath='{.spec.containers[0].securityContext.capabilities.drop[*]}')
+        echo "$caps" | grep -q "ALL"
+      expectExitCode: 0
+
+    - name: "Pod has required seccomp profile"
+      type: jsonpath
+      resource: pod
+      namespace: production
+      selector: "app=jerry-app"
+      jsonpath: "{.spec.securityContext.seccompProfile.type}"
+      expectedValue: "RuntimeDefault"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Excellent! Jerry's app now runs with restricted security standards.
+
+    **Key takeaway:** Pod Security Admission enforces security at the namespace
+    level. Always check `kubectl describe` events for admission failures and
+    adjust the pod's securityContext to meet the required standard.

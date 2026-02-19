@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-static-scheduler-probe
+  labels:
+    app: jerry-static-scheduler-probe
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-static-scheduler-probe
+  template:
+    metadata:
+      labels:
+        app: jerry-static-scheduler-probe
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10

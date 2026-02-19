@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-nodeport-app
+  labels:
+    app: jerry-nodeport
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-nodeport
+  template:
+    metadata:
+      labels:
+        app: jerry-nodeport
+    spec:
+      containers:
+        - name: app
+          image: hashicorp/http-echo:1.0.0
+          args:
+            - "-text=jerry-nodeport-ok"
+            - "-listen=:5678"
+          ports:
+            - containerPort: 5678

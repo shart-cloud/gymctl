@@ -1,0 +1,115 @@
+FROM ubuntu:24.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HOME=/home/student
+ENV USER=student
+
+# Install base packages first
+RUN apt-get update && apt-get install -y \
+    # Core utilities
+    curl wget git ca-certificates gnupg lsb-release \
+    # Editors and shell tools
+    vim nano neovim zsh \
+    # Development tools
+    build-essential python3 python3-pip \
+    # Network utilities
+    net-tools iputils-ping telnet netcat-openbsd \
+    # File tools
+    tree less file unzip zip \
+    # Other utilities
+    htop tmux screen jq sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create student user (using dynamic UID to avoid conflicts)
+RUN useradd -m -s /bin/zsh student && \
+    echo "student:student" | chpasswd && \
+    usermod -aG sudo student && \
+    echo "student ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Install Docker CLI
+RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && apt-get install -y docker-ce-cli docker-compose-plugin && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Kubernetes tools (pinned to 1.35.*)
+RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes-apt-keyring.gpg && \
+    echo 'deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list && \
+    apt-get update && apt-get install -y kubectl=1.35.* && \
+    apt-mark hold kubectl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Helm
+RUN curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | tee /usr/share/keyrings/helm.gpg > /dev/null && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | tee /etc/apt/sources.list.d/helm-stable-debian.list && \
+    apt-get update && apt-get install -y helm && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Kind
+RUN curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64 && \
+    chmod +x ./kind && \
+    mv ./kind /usr/local/bin/kind
+
+# Install YAML tools
+RUN pip3 install --no-cache-dir yq pyyaml && \
+    curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq-go && \
+    chmod +x /usr/local/bin/yq-go
+
+# Install additional YAML/JSON tools
+RUN curl -L https://github.com/stedolan/jq/releases/latest/download/jq-linux64 -o /usr/local/bin/jq && \
+    chmod +x /usr/local/bin/jq
+
+# Install kubectx/kubens for easier context switching
+RUN git clone https://github.com/ahmetb/kubectx /opt/kubectx && \
+    ln -s /opt/kubectx/kubectx /usr/local/bin/kubectx && \
+    ln -s /opt/kubectx/kubens /usr/local/bin/kubens
+
+# Install Oh My Zsh for student user
+USER student
+WORKDIR $HOME
+
+RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+
+# Configure zsh with useful aliases and settings
+RUN echo 'export PATH=$PATH:/usr/local/bin' >> ~/.zshrc && \
+    echo 'alias k=kubectl' >> ~/.zshrc && \
+    echo 'alias kgp="kubectl get pods"' >> ~/.zshrc && \
+    echo 'alias kgs="kubectl get svc"' >> ~/.zshrc && \
+    echo 'alias kgd="kubectl get deploy"' >> ~/.zshrc && \
+    echo 'alias ll="ls -la"' >> ~/.zshrc && \
+    echo 'alias la="ls -la"' >> ~/.zshrc && \
+    echo 'alias ..="cd .."' >> ~/.zshrc && \
+    echo 'alias ...="cd ../.."' >> ~/.zshrc && \
+    echo 'alias dc="docker compose"' >> ~/.zshrc && \
+    echo 'alias dcu="docker compose up"' >> ~/.zshrc && \
+    echo 'alias dcd="docker compose down"' >> ~/.zshrc && \
+    echo 'alias dps="docker ps"' >> ~/.zshrc && \
+    echo 'alias dimg="docker images"' >> ~/.zshrc
+
+# Configure vim with basic settings
+RUN echo 'set number' >> ~/.vimrc && \
+    echo 'set tabstop=2' >> ~/.vimrc && \
+    echo 'set shiftwidth=2' >> ~/.vimrc && \
+    echo 'set expandtab' >> ~/.vimrc && \
+    echo 'set autoindent' >> ~/.vimrc && \
+    echo 'syntax on' >> ~/.vimrc && \
+    echo 'set background=dark' >> ~/.vimrc
+
+# Configure neovim
+RUN mkdir -p ~/.config/nvim && \
+    echo 'set number' >> ~/.config/nvim/init.vim && \
+    echo 'set tabstop=2' >> ~/.config/nvim/init.vim && \
+    echo 'set shiftwidth=2' >> ~/.config/nvim/init.vim && \
+    echo 'set expandtab' >> ~/.config/nvim/init.vim && \
+    echo 'set autoindent' >> ~/.config/nvim/init.vim && \
+    echo 'syntax on' >> ~/.config/nvim/init.vim
+
+# Create directories for mounted volumes
+RUN mkdir -p ~/.gym ~/workdir
+
+# Set working directory to where exercises will be mounted
+WORKDIR /workspace
+
+# Keep container running
+CMD ["/bin/zsh"]

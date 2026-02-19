@@ -135,6 +135,8 @@ DOCKER_IMAGE ?= gymctl
 DOCKER_TAG ?= latest
 DOCKER_REGISTRY ?= ghcr.io/shart
 DOCKER_FULL_IMAGE = $(DOCKER_REGISTRY)/$(DOCKER_IMAGE):$(DOCKER_TAG)
+WORKSTATION_IMAGE ?= gymctl-workstation
+WORKSTATION_TAG ?= latest
 
 # Docker targets
 .PHONY: docker-build
@@ -151,6 +153,11 @@ docker-build-alpine:
 docker-build-debian:
 	@echo "Building full-featured Debian image..."
 	docker build -f Dockerfile.debian -t $(DOCKER_IMAGE):debian .
+
+.PHONY: workstation-build
+workstation-build:
+	@echo "Building workstation image..."
+	docker build -f Dockerfile.workstation -t $(WORKSTATION_IMAGE):$(WORKSTATION_TAG) .
 
 .PHONY: docker-run
 docker-run:

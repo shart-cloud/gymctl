@@ -1,0 +1,103 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-coredns-loop
+  title: "Jerry Misconfigured CoreDNS"
+  track: k8s-troubleshooting
+  week: 6
+  order: 5
+
+spec:
+  difficulty: advanced
+  estimatedTime: 30m
+  points: 150
+
+  description: |
+    Jerry pushed a bad CoreDNS config during networking maintenance.
+    CoreDNS is still running, but cluster DNS is broken and workloads cannot
+    resolve service names.
+
+    Restore CoreDNS so in-cluster DNS lookups work again.
+
+  learningOutcomes:
+    - "Troubleshoot cluster DNS failures when CoreDNS pods are still Running"
+    - "Inspect and repair CoreDNS Corefile safely"
+    - "Validate DNS recovery from inside the cluster"
+
+  tags:
+    - troubleshooting
+    - dns
+    - coredns
+    - cluster-components
+    - networking
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+    customSetup:
+      - type: script
+        script: |
+          kubectl -n kube-system patch configmap coredns --type merge -p '{"data":{"Corefile":".:53 {\n    errors\n    health\n    ready\n    forward . 127.0.0.1\n    cache 30\n    loop\n    reload\n    loadbalance\n}\n"}}'
+          kubectl -n kube-system rollout restart deployment/coredns
+          kubectl -n kube-system rollout status deployment/coredns --timeout=120s || true
+          sleep 3
+
+  checks:
+    - name: "CoreDNS deployment is Available"
+      type: condition
+      namespace: kube-system
+      resource: deployment/coredns
+      condition: Available
+      status: "True"
+
+    - name: "Corefile no longer forwards to localhost"
+      type: script
+      script: |
+        set -e
+        ! kubectl -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}' | grep -q 'forward . 127.0.0.1'
+      expectExitCode: 0
+
+    - name: "Corefile contains kubernetes plugin for cluster.local"
+      type: script
+      script: |
+        set -e
+        kubectl -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}' | grep -q 'kubernetes cluster.local'
+      expectExitCode: 0
+
+    - name: "DNS resolves kubernetes.default service"
+      type: script
+      script: |
+        set -e
+        kubectl delete pod dns-test --ignore-not-found >/dev/null 2>&1 || true
+        kubectl run dns-test --image=busybox:1.36 --restart=Never --command -- nslookup kubernetes.default.svc.cluster.local >/dev/null
+
+        for i in $(seq 1 25); do
+          phase=$(kubectl get pod dns-test -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ]; then
+            break
+          fi
+          sleep 1
+        done
+
+        logs=$(kubectl logs dns-test 2>&1 || true)
+        kubectl delete pod dns-test --ignore-not-found >/dev/null 2>&1 || true
+
+        echo "$logs" | grep -q 'kubernetes.default.svc.cluster.local'
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    CoreDNS recovered and service discovery is healthy again.
+
+    **Key takeaway:** component-level failures often look like app failures.
+    Validate DNS early when multiple workloads fail to connect by name.

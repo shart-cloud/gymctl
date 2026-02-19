@@ -1,0 +1,149 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-static-pod-misconfigured
+  title: "Jerry Broke a Control-Plane Static Pod"
+  track: k8s-admin
+  week: 8
+  order: 3
+
+spec:
+  difficulty: advanced
+  estimatedTime: 30m
+  points: 160
+
+  description: |
+    Jerry edited a control-plane static pod manifest directly on the node and
+    kube-scheduler stopped working. Existing workloads are still visible, but
+    new pods stay Pending because nothing is scheduling them.
+
+    Repair the static pod manifest on the control-plane node so kube-scheduler
+    is healthy again and new pods can be scheduled.
+
+  learningOutcomes:
+    - "Diagnose control-plane failures caused by broken static pod manifests"
+    - "Locate and edit static pod files under /etc/kubernetes/manifests"
+    - "Validate scheduler recovery by creating new workloads"
+
+  tags:
+    - cka
+    - control-plane
+    - static-pods
+    - kube-scheduler
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+      waitFor:
+        - resource: deployment/jerry-static-scheduler-probe
+          condition: available
+          timeout: 120s
+    customSetup:
+      - type: script
+        timeout: 180s
+        script: |
+          set -e
+
+          node=$(kubectl get nodes -o name | sed 's#node/##' | grep -E 'control-plane|master' | head -n1)
+          if [ -z "$node" ]; then
+            node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+          fi
+
+          docker exec "$node" sh -c '
+            set -e
+            manifest=/etc/kubernetes/manifests/kube-scheduler.yaml
+            cp "$manifest" "${manifest}.bak"
+            grep -q -- "--kubeconfig=/etc/kubernetes/scheduler.conf" "$manifest"
+            sed -i "s#--kubeconfig=/etc/kubernetes/scheduler.conf#--kubeconfig=/etc/kubernetes/scheduler-broken.conf#g" "$manifest"
+          '
+
+          for i in $(seq 1 90); do
+            ready=$(kubectl -n kube-system get pods -l component=kube-scheduler -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+            if [ "$ready" != "True" ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "scheduler did not transition away from Ready"
+          exit 1
+
+  checks:
+    - name: "kube-scheduler pod is Ready"
+      type: script
+      script: |
+        set -e
+        kubectl -n kube-system wait --for=condition=Ready pod -l component=kube-scheduler --timeout=120s >/dev/null
+      expectExitCode: 0
+
+    - name: "Static pod manifest uses the correct scheduler kubeconfig"
+      type: script
+      script: |
+        set -e
+        node=$(kubectl get nodes -o name | sed 's#node/##' | grep -E 'control-plane|master' | head -n1)
+        if [ -z "$node" ]; then
+          node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+        fi
+
+        line=$(docker exec "$node" sh -c "grep -E -- '--kubeconfig=' /etc/kubernetes/manifests/kube-scheduler.yaml | head -n1")
+        echo "$line" | grep -q '/etc/kubernetes/scheduler.conf'
+        ! echo "$line" | grep -q '/etc/kubernetes/scheduler-broken.conf'
+      expectExitCode: 0
+
+    - name: "New pod can be scheduled"
+      type: script
+      script: |
+        set -e
+        kubectl delete pod scheduler-check --ignore-not-found >/dev/null 2>&1 || true
+        kubectl run scheduler-check --image=registry.k8s.io/pause:3.10 --restart=Never >/dev/null
+
+        for i in $(seq 1 60); do
+          node=$(kubectl get pod scheduler-check -o jsonpath='{.spec.nodeName}' 2>/dev/null || true)
+          phase=$(kubectl get pod scheduler-check -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ -n "$node" ] && [ "$phase" != "Pending" ]; then
+            kubectl delete pod scheduler-check --ignore-not-found >/dev/null 2>&1 || true
+            exit 0
+          fi
+          sleep 1
+        done
+
+        kubectl get pod scheduler-check -o wide || true
+        kubectl delete pod scheduler-check --ignore-not-found >/dev/null 2>&1 || true
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Scheduler recovered.
+
+    **Key takeaway:** for static pod outages, inspect the node-local manifest
+    first. Fixing `/etc/kubernetes/manifests/*.yaml` is often the fastest path.
+
+  tasking:
+    ticket: "OPS-2077"
+    priority: "P0"
+    summary: "New workloads are stuck Pending after control-plane maintenance"
+    description: |
+      Jerry changed a static pod manifest on the control-plane node. The
+      scheduler is no longer healthy, and new pods cannot be assigned to any
+      node. Restore scheduler functionality immediately.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "i only changed one flag in a yaml under /etc/kubernetes/manifests"
+    onCheckFail: "the control-plane pod is there, so it's probably fine"
+    onHintUsed: "i thought static pods just restart themselves forever"
+    onComplete: "okay, node-local manifests are real production blast radius"

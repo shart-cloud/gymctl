@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-node-app
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-node-app
+  template:
+    metadata:
+      labels:
+        app: jerry-node-app
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10

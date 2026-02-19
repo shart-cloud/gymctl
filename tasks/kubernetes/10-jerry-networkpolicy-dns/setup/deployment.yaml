@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dns-debug
+  labels:
+    app: dns-debug
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dns-debug
+  template:
+    metadata:
+      labels:
+        app: dns-debug
+    spec:
+      containers:
+        - name: toolbox
+          image: busybox:1.36
+          command: ["/bin/sh", "-c", "sleep 36000"]

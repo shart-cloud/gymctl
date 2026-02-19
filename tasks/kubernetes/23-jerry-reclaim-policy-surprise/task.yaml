@@ -1,0 +1,117 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-reclaim-policy-surprise
+  title: "Jerry's Reclaim Policy Surprise"
+  track: k8s-storage
+  week: 5
+  order: 3
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 140
+
+  description: |
+    Jerry assumed volumes would be retained for forensic recovery, but his
+    StorageClass is configured with `Delete`. That means PVs disappear when
+    claims are removed.
+
+    Fix the StorageClass so retention behavior matches expectations.
+
+  learningOutcomes:
+    - "Inspect StorageClass reclaim policy"
+    - "Understand Delete vs Retain lifecycle behavior"
+    - "Verify retained PV behavior after PVC deletion"
+
+  tags:
+    - storage
+    - reclaim-policy
+    - persistentvolumes
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/storageclass.yaml
+
+  checks:
+    - name: "StorageClass jerry-retain exists"
+      type: resourceExists
+      resource: storageclass/jerry-retain
+
+    - name: "StorageClass reclaimPolicy is Retain"
+      type: jsonpath
+      resource: storageclass/jerry-retain
+      jsonpath: "{.reclaimPolicy}"
+      operator: equals
+      value: "Retain"
+
+    - name: "Test claim leaves PV behind after delete"
+      type: script
+      script: |
+        set -e
+
+        name="reclaim-test-$(date +%s)"
+
+        cat <<MANIFEST | kubectl apply -f - >/dev/null
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: ${name}
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+          storageClassName: jerry-retain
+        MANIFEST
+
+        for i in $(seq 1 60); do
+          phase=$(kubectl get pvc "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Bound" ]; then
+            break
+          fi
+          sleep 2
+        done
+
+        phase=$(kubectl get pvc "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+        [ "$phase" = "Bound" ] || { echo "FAIL: pvc did not bind"; exit 1; }
+
+        pv=$(kubectl get pvc "$name" -o jsonpath='{.spec.volumeName}')
+        [ -n "$pv" ] || { echo "FAIL: pvc bound without pv name"; exit 1; }
+
+        kubectl delete pvc "$name" >/dev/null
+
+        for i in $(seq 1 30); do
+          if kubectl get pv "$pv" >/dev/null 2>&1; then
+            phase=$(kubectl get pv "$pv" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            if [ "$phase" = "Released" ] || [ "$phase" = "Bound" ] || [ "$phase" = "Available" ]; then
+              kubectl delete pv "$pv" >/dev/null 2>&1 || true
+              exit 0
+            fi
+          fi
+          sleep 2
+        done
+
+        echo "FAIL: PV was not retained"
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Reclaim policy corrected.
+
+    **Key takeaway:** `Retain` is an explicit safety choice. Verify lifecycle
+    behavior, not just YAML fields, when data durability matters.

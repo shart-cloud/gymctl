@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-ha-app
+  namespace: default
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: jerry-ha-app
+  template:
+    metadata:
+      labels:
+        app: jerry-ha-app
+    spec:
+      # Jerry's deployment has no anti-affinity - all pods can land on same node
+      containers:
+      - name: nginx
+        image: nginx:1.20
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi

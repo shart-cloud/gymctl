@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-hog
+  labels:
+    app: jerry-hog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-hog
+  template:
+    metadata:
+      labels:
+        app: jerry-hog
+    spec:
+      containers:
+        - name: hog
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              while true; do
+                :
+              done

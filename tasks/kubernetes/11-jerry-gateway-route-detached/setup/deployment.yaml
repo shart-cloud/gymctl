@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-route-app
+  labels:
+    app: jerry-route
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-route
+  template:
+    metadata:
+      labels:
+        app: jerry-route
+    spec:
+      containers:
+        - name: app
+          image: hashicorp/http-echo:1.0.0
+          args:
+            - "-text=jerry-route-ok"
+            - "-listen=:5678"
+          ports:
+            - containerPort: 5678

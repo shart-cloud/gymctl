@@ -1,0 +1,91 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-networkpolicy-dns
+  title: "Jerry Blocked DNS With NetworkPolicy"
+  track: k8s-networking
+  week: 6
+  order: 3
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 130
+
+  description: |
+    Jerry locked down egress with NetworkPolicy, which is good, but he broke DNS.
+    Workloads selected by the policy can no longer resolve service names.
+
+    Keep the deny-by-default posture, but restore DNS resolution.
+
+  learningOutcomes:
+    - "Apply default-deny egress safely"
+    - "Allow only required DNS traffic"
+    - "Debug DNS failures caused by NetworkPolicy"
+
+  tags:
+    - networking
+    - networkpolicy
+    - dns
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+        - setup/deny-all-egress.yaml
+        - setup/allow-dns-egress.yaml
+      waitFor:
+        - resource: deployment/dns-debug
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "dns-debug deployment is available"
+      type: condition
+      resource: deployment/dns-debug
+      condition: Available
+      status: "True"
+
+    - name: "Default deny egress policy remains"
+      type: resourceExists
+      resource: networkpolicy/deny-all-egress
+
+    - name: "DNS allow policy exists"
+      type: resourceExists
+      resource: networkpolicy/allow-dns-egress
+
+    - name: "DNS allow policy uses port 53"
+      type: jsonpath
+      resource: networkpolicy/allow-dns-egress
+      jsonpath: "{.spec.egress[0].ports[0].port}"
+      operator: equals
+      value: 53
+
+    - name: "Pod can resolve kubernetes.default"
+      type: exec
+      resource: deployment/dns-debug
+      command:
+        - nslookup
+        - kubernetes.default.svc.cluster.local
+      expectExitCode: 0
+      expectOutput:
+        contains: "kubernetes.default.svc.cluster.local"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    DNS is back without opening all egress.
+
+    **Key takeaway:** default deny is only safe when critical dependencies
+    (like DNS) are explicitly allowed.

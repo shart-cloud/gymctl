@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jerry-hpa-web
+spec:
+  selector:
+    app: jerry-hpa-web
+  ports:
+    - port: 80
+      targetPort: 80

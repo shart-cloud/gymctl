@@ -104,7 +104,30 @@
             "required": ["name"]
           }
         },
-        "variantSelection": {"type": "string"}
+        "variantSelection": {"type": "string"},
+        "jerryDialog": {
+          "type": "object",
+          "properties": {
+            "onStart":     {"type": "string"},
+            "onCheckFail": {"type": "string"},
+            "onCheckPass": {"type": "string"},
+            "onHintUsed":  {"type": "string"},
+            "onComplete":  {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "tasking": {
+          "type": "object",
+          "required": ["ticket", "priority", "summary", "description"],
+          "properties": {
+            "ticket":      {"type": "string"},
+            "priority":    {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
+            "summary":     {"type": "string"},
+            "description": {"type": "string"},
+            "reporter":    {"type": "string"}
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": true
     }

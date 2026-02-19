@@ -1,0 +1,119 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-kubeconfig-context-confusion
+  title: "Jerry's Kubeconfig Context Confusion"
+  track: k8s-admin
+  week: 4
+  order: 7
+
+spec:
+  difficulty: beginner
+  estimatedTime: 15m
+  points: 110
+
+  description: |
+    Jerry left your kubeconfig on the wrong context before handoff. Every
+    kubectl command now fails against a dead API endpoint, even though the
+    local kind cluster is healthy.
+
+    Select the correct context and prove you can reach the intended workload.
+
+  learningOutcomes:
+    - "Inspect kubeconfig contexts and identify the active one"
+    - "Switch safely to the intended cluster context"
+    - "Verify command targeting after context recovery"
+
+  tags:
+    - cka
+    - kubeconfig
+    - contexts
+    - cluster-admin
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+      waitFor:
+        - resource: deployment/jerry-context-app
+          condition: available
+          timeout: 120s
+    customSetup:
+      - type: script
+        script: |
+          set -e
+
+          kubectl config set-cluster jerry-bogus --server=https://127.0.0.1:65535 --insecure-skip-tls-verify=true >/dev/null
+          kubectl config set-credentials jerry-bogus-user --token=fake-token >/dev/null
+          kubectl config set-context jerry-bogus --cluster=jerry-bogus --user=jerry-bogus-user --namespace=default >/dev/null
+          kubectl config use-context jerry-bogus >/dev/null
+
+          if kubectl get namespace >/dev/null 2>&1; then
+            echo "expected the bogus context to fail"
+            exit 1
+          fi
+
+  checks:
+    - name: "Current context is kind-jerry-gym"
+      type: script
+      script: |
+        set -e
+        ctx=$(kubectl config current-context 2>/dev/null || true)
+        [ "$ctx" = "kind-jerry-gym" ]
+      expectExitCode: 0
+
+    - name: "Can query default namespace"
+      type: script
+      script: |
+        set -e
+        kubectl get namespace default >/dev/null
+      expectExitCode: 0
+
+    - name: "Target deployment is Available"
+      type: condition
+      resource: deployment/jerry-context-app
+      condition: Available
+      status: "True"
+
+    - name: "Can target the expected deployment"
+      type: script
+      script: |
+        set -e
+        name=$(kubectl get deployment jerry-context-app -o jsonpath='{.metadata.name}')
+        [ "$name" = "jerry-context-app" ]
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Context recovered.
+
+    **Key takeaway:** when kubectl suddenly fails, check your active context
+    before debugging cluster resources.
+
+  tasking:
+    ticket: "OPS-2102"
+    priority: "P1"
+    summary: "kubectl commands are targeting the wrong cluster context"
+    description: |
+      Jerry left kubeconfig in a dead context. Incident responders cannot run
+      even basic diagnostics because kubectl points at an invalid API server.
+      Restore command targeting to the correct cluster immediately.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "i was testing another cluster and forgot to switch back"
+    onCheckFail: "kubectl just keeps timing out, maybe the cluster died"
+    onHintUsed: "there are more contexts in kubeconfig than i expected"
+    onComplete: "okay, i will always check current-context first"

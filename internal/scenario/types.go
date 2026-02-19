@@ -31,6 +31,26 @@ type ExerciseSpec struct {
 	References       []Reference     `yaml:"references,omitempty"`
 	Variants         []Variant       `yaml:"variants,omitempty"`
 	VariantSelection string          `yaml:"variantSelection,omitempty"`
+	JerryDialog      *JerryDialog    `yaml:"jerryDialog,omitempty"`
+	Tasking          *GRIMTasking    `yaml:"tasking,omitempty"`
+}
+
+// JerryDialog holds trigger-keyed voice lines from Jerry.
+type JerryDialog struct {
+	OnStart     string `yaml:"onStart,omitempty"`
+	OnCheckFail string `yaml:"onCheckFail,omitempty"`
+	OnCheckPass string `yaml:"onCheckPass,omitempty"`
+	OnHintUsed  string `yaml:"onHintUsed,omitempty"`
+	OnComplete  string `yaml:"onComplete,omitempty"`
+}
+
+// GRIMTasking holds the GRIM-9 ticket metadata for an exercise.
+type GRIMTasking struct {
+	Ticket      string `yaml:"ticket"`
+	Priority    string `yaml:"priority"`
+	Summary     string `yaml:"summary"`
+	Description string `yaml:"description"`
+	Reporter    string `yaml:"reporter,omitempty"`
 }
 
 type EnvironmentSpec struct {
@@ -101,6 +121,7 @@ type Check struct {
 	Check          string            `yaml:"check,omitempty"`
 	Recursive      *bool             `yaml:"recursive,omitempty"`
 	Exists         *bool             `yaml:"exists,omitempty"`
+	ShouldExist    *bool             `yaml:"shouldExist,omitempty"`
 }
 
 type ExpectOutput struct {

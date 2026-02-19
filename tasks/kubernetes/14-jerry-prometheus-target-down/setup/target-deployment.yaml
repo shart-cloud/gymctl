@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-target
+  labels:
+    app: metrics-target
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metrics-target
+  template:
+    metadata:
+      labels:
+        app: metrics-target
+    spec:
+      containers:
+        - name: exporter
+          image: hashicorp/http-echo:1.0.0
+          args:
+            - "-text=course_visits_total 1"
+            - "-listen=:8080"
+          ports:
+            - containerPort: 8080

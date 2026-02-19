@@ -27,6 +27,8 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.SilenceErrors = true
+	rootCmd.SilenceUsage = true
 	rootCmd.PersistentFlags().StringVar(&tasksDir, "tasks-dir", "tasks", "Tasks directory")
 	rootCmd.PersistentFlags().StringVar(&progressFile, "progress-file", "", "Progress file path (default: ~/.gym/progress.yaml)")
 
@@ -44,5 +46,9 @@ func init() {
 		newCleanupCmd(),
 		newDescribeCmd(),
 		newDiagnoseCmd(),
+		newNextCmd(),
+		newWatchCmd(),
+		newShellCmd(),
+		newInfoCmd(),
 	)
 }

@@ -1,0 +1,89 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-ci-pipeline-fix
+  title: "Jerry's CI Pipeline Is Broken"
+  track: devsecops
+  week: 8
+  order: 3
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 120
+
+  description: |
+    Jerry's GitHub Actions workflow no longer enforces the expected
+    fail-fast DevSecOps checks. Trigger coverage is incomplete, lint/security
+    commands are broken, and build ordering is wrong.
+
+    Fix `.github/workflows/ci.yml` so the pipeline matches course standards.
+
+  learningOutcomes:
+    - "Debug broken GitHub Actions workflow definitions"
+    - "Restore fail-fast stage ordering"
+    - "Reinstate required local security and validation tools"
+
+  tags:
+    - github-actions
+    - ci
+    - devsecops
+
+  environment:
+    type: docker
+    docker:
+      copyFiles:
+        - from: setup/.github/
+          to: .github/
+
+  checks:
+    - name: "Workflow file exists"
+      type: file
+      path: .github/workflows/ci.yml
+      exists: true
+
+    - name: "Workflow runs on pull requests"
+      type: file
+      path: .github/workflows/ci.yml
+      operator: contains
+      value: "pull_request:"
+
+    - name: "Ruff check command is present"
+      type: file
+      path: .github/workflows/ci.yml
+      operator: contains
+      value: "ruff check ."
+
+    - name: "Bandit scan command is present"
+      type: file
+      path: .github/workflows/ci.yml
+      operator: contains
+      value: "bandit -r ."
+
+    - name: "Kubeconform validation command is present"
+      type: file
+      path: .github/workflows/ci.yml
+      operator: contains
+      value: "kubeconform"
+
+    - name: "Build job depends on quality job"
+      type: script
+      script: |
+        set -e
+        awk '/^  build:/{in_build=1;next} /^  [a-zA-Z0-9_-]+:/{if(in_build) exit} in_build{print}' .github/workflows/ci.yml | grep -Eq 'needs:\s*\[?quality\]?'
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    CI pipeline repaired.
+
+    **Key takeaway:** fail-fast pipelines depend on both correct trigger scope
+    and strict stage ordering (quality/security before build/deploy).

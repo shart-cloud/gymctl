@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-worker
+  labels:
+    app: jerry-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-worker
+  template:
+    metadata:
+      labels:
+        app: jerry-worker
+    spec:
+      containers:
+        - name: worker
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+

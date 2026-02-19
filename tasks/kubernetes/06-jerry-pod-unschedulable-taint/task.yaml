@@ -1,0 +1,90 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-pod-unschedulable-taint
+  title: "Jerry Tainted Every Node"
+  track: k8s-troubleshooting
+  week: 7
+  order: 1
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 120
+
+  description: |
+    Jerry added a NoSchedule taint to every node in the cluster and then
+    restarted the workload. Now the app pods are stuck Pending.
+
+    Restore scheduling so the deployment becomes healthy again.
+
+  learningOutcomes:
+    - "Troubleshoot Pending pods caused by taints"
+    - "Use kubectl describe/events to find scheduling blockers"
+    - "Remove incorrect taints safely"
+
+  tags:
+    - troubleshooting
+    - scheduling
+    - taints
+    - nodes
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+      waitFor:
+        - resource: deployment/jerry-worker
+          condition: available
+          timeout: 120s
+    customSetup:
+      - type: script
+        script: |
+          kubectl taint nodes --all jerry=blocked:NoSchedule --overwrite
+          kubectl rollout restart deployment/jerry-worker
+          sleep 5
+
+  checks:
+    - name: "No jerry taint remains on nodes"
+      type: script
+      script: |
+        set -e
+        taints=$(kubectl get nodes -o jsonpath='{.items[*].spec.taints[*].key}' 2>/dev/null || true)
+        if echo "$taints" | tr ' ' '\n' | grep -q '^jerry$'; then
+          echo "FAIL: blocking taint still present"
+          exit 1
+        fi
+        echo "OK: jerry taint removed"
+      expectExitCode: 0
+
+    - name: "Deployment is Available"
+      type: condition
+      resource: deployment/jerry-worker
+      condition: Available
+      status: "True"
+
+    - name: "At least one pod is Running"
+      type: script
+      script: |
+        phase=$(kubectl get pods -l app=jerry-worker -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
+        [ "$phase" = "Running" ]
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Nice recovery. Pods can schedule again.
+
+    **Key takeaway:** a single bad NoSchedule taint can starve workloads.
+    Always verify node taints when pods are stuck Pending.
+

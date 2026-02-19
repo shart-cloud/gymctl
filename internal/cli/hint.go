@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"gymctl/internal/dialogue"
 	"gymctl/internal/progress"
 	"gymctl/internal/scenario"
 )
@@ -77,7 +78,26 @@ func newHintCmd() *cobra.Command {
 
 			status.HintsUsed = endIndex
 			progressFile.Exercises[entry.Exercise.Metadata.Name] = status
-			return progress.Save(progressPath, progressFile)
+			if err := progress.Save(progressPath, progressFile); err != nil {
+				return err
+			}
+
+			dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(entry.Exercise.Spec.JerryDialog, "onHintUsed", entry.Exercise.Metadata.Name))
+			fmt.Fprintln(cmd.OutOrStdout())
+
+			remaining := len(entry.Exercise.Spec.Hints) - status.HintsUsed
+			if remaining == 0 {
+				ColorDim.Fprintln(cmd.OutOrStdout(), "  No more hints available.")
+			} else {
+				nextCost := entry.Exercise.Spec.Hints[status.HintsUsed].Cost
+				if nextCost == 0 {
+					ColorDim.Fprintf(cmd.OutOrStdout(), "  %d hint(s) remaining · next hint is free\n", remaining)
+				} else {
+					ColorDim.Fprintf(cmd.OutOrStdout(), "  %d hint(s) remaining · next hint costs %d pts\n", remaining, nextCost)
+				}
+			}
+
+			return nil
 		},
 	}
 

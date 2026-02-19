@@ -91,6 +91,12 @@ func newResetCmd() *cobra.Command {
 						return err
 					}
 				}
+
+				if len(exercise.Spec.Environment.CustomSetup) > 0 {
+					if err := environment.RunCustomSetup(ctx, entry.Dir, exercise.Spec.Environment.CustomSetup); err != nil {
+						return err
+					}
+				}
 			case "docker":
 				if exercise.Spec.Environment.Docker == nil {
 					return fmt.Errorf("missing docker environment config")

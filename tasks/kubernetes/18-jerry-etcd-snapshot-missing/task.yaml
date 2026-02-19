@@ -1,0 +1,135 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-etcd-snapshot-missing
+  title: "Jerry Forgot The etcd Snapshot"
+  track: k8s-admin
+  week: 5
+  order: 1
+
+spec:
+  difficulty: advanced
+  estimatedTime: 30m
+  points: 150
+
+  description: |
+    Jerry is about to perform risky control-plane maintenance, but there is no
+    etcd backup. Before touching anything, create an etcd snapshot and prove it
+    can be restored into a separate data directory.
+
+    Use the control-plane etcd pod in `kube-system`.
+    Required artifact paths:
+    - Snapshot: `/var/lib/etcd/etcd-snapshot.db`
+    - Restore data dir: `/var/lib/etcd/restore-dryrun`
+
+  learningOutcomes:
+    - "Take an etcd snapshot from the control-plane pod using TLS certs"
+    - "Validate snapshot integrity with etcdctl snapshot status"
+    - "Perform a non-destructive restore drill to a separate data directory"
+
+  tags:
+    - etcd
+    - backup
+    - restore
+    - cluster-admin
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+
+  checks:
+    - name: "Control-plane etcd endpoint is healthy"
+      type: script
+      script: |
+        set -e
+        pod=$(kubectl -n kube-system get pods -l component=etcd -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        [ -n "$pod" ] || { echo "FAIL: etcd pod not found"; exit 1; }
+
+        bin=""
+        for candidate in etcdctl /usr/local/bin/etcdctl; do
+          if kubectl -n kube-system exec "$pod" -- "$candidate" version >/dev/null 2>&1; then
+            bin="$candidate"
+            break
+          fi
+        done
+        [ -n "$bin" ] || { echo "FAIL: etcdctl binary not found in etcd pod"; exit 1; }
+
+        output=$(kubectl -n kube-system exec "$pod" -- env ETCDCTL_API=3 "$bin" \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+          --key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
+          endpoint health 2>/dev/null || true)
+
+        echo "$output" | grep -qi "healthy"
+      expectExitCode: 0
+
+    - name: "Snapshot file exists and has keys"
+      type: script
+      script: |
+        set -e
+        pod=$(kubectl -n kube-system get pods -l component=etcd -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        [ -n "$pod" ] || { echo "FAIL: etcd pod not found"; exit 1; }
+
+        bin=""
+        for candidate in etcdctl /usr/local/bin/etcdctl; do
+          if kubectl -n kube-system exec "$pod" -- "$candidate" version >/dev/null 2>&1; then
+            bin="$candidate"
+            break
+          fi
+        done
+        [ -n "$bin" ] || { echo "FAIL: etcdctl binary not found in etcd pod"; exit 1; }
+
+        status=$(kubectl -n kube-system exec "$pod" -- env ETCDCTL_API=3 "$bin" \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+          --key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
+          snapshot status /var/lib/etcd/etcd-snapshot.db -w json 2>/dev/null || true)
+
+        echo "$status" | grep -Eq '"totalKey"\s*:\s*[1-9][0-9]*'
+      expectExitCode: 0
+
+    - name: "Dry-run restore output exists and is valid"
+      type: script
+      script: |
+        set -e
+        pod=$(kubectl -n kube-system get pods -l component=etcd -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        [ -n "$pod" ] || { echo "FAIL: etcd pod not found"; exit 1; }
+
+        bin=""
+        for candidate in etcdctl /usr/local/bin/etcdctl; do
+          if kubectl -n kube-system exec "$pod" -- "$candidate" version >/dev/null 2>&1; then
+            bin="$candidate"
+            break
+          fi
+        done
+        [ -n "$bin" ] || { echo "FAIL: etcdctl binary not found in etcd pod"; exit 1; }
+
+        restored=$(kubectl -n kube-system exec "$pod" -- env ETCDCTL_API=3 "$bin" \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+          --key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
+          snapshot status /var/lib/etcd/restore-dryrun/member/snap/db -w json 2>/dev/null || true)
+
+        echo "$restored" | grep -Eq '"totalKey"\s*:\s*[1-9][0-9]*'
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Snapshot and restore drill completed.
+
+    **Key takeaway:** never perform control-plane changes without a verified
+    etcd backup and a tested restore path.

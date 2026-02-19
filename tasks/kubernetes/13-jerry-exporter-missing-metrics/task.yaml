@@ -1,0 +1,102 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-exporter-missing-metrics
+  title: "Jerry's Exporter Missing Metrics"
+  track: k8s-observability
+  week: 7
+  order: 1
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 120
+
+  description: |
+    Jerry deployed a metrics exporter, but it only exposes one metric.
+    Prometheus can scrape it, but the business metric is missing.
+
+    Fix the exporter configuration so `/metrics` includes both required series.
+
+  learningOutcomes:
+    - "Validate exporter output format and content"
+    - "Debug configuration-driven metric omissions"
+    - "Test metrics endpoints from inside the cluster"
+
+  tags:
+    - observability
+    - prometheus
+    - exporter
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/exporter-script-configmap.yaml
+        - setup/deployment.yaml
+        - setup/service.yaml
+      waitFor:
+        - resource: deployment/jerry-exporter
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "Exporter deployment is available"
+      type: condition
+      resource: deployment/jerry-exporter
+      condition: Available
+      status: "True"
+
+    - name: "Exporter emits guestbook metric flag"
+      type: jsonpath
+      resource: deployment/jerry-exporter
+      jsonpath: "{.spec.template.spec.containers[0].env[0].value}"
+      operator: equals
+      value: "true"
+
+    - name: "Metrics endpoint includes both required metrics"
+      type: script
+      script: |
+        set -e
+        kubectl delete pod exporter-check --ignore-not-found >/dev/null 2>&1 || true
+        kubectl run exporter-check --image=busybox:1.36 --restart=Never --command -- sh -c "wget -qO- -T 5 http://jerry-exporter:8080/metrics | grep -q '^course_visits_total ' && wget -qO- -T 5 http://jerry-exporter:8080/metrics | grep -q '^course_guestbook_entries '"
+
+        for i in $(seq 1 30); do
+          phase=$(kubectl get pod exporter-check -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ]; then
+            break
+          fi
+          sleep 1
+        done
+
+        phase=$(kubectl get pod exporter-check -o jsonpath='{.status.phase}' 2>/dev/null || true)
+        logs=$(kubectl logs exporter-check 2>/dev/null || true)
+        kubectl delete pod exporter-check --ignore-not-found >/dev/null 2>&1 || true
+
+        if [ "$phase" = "Succeeded" ]; then
+          echo "OK: both metrics present"
+          exit 0
+        fi
+
+        echo "FAIL: metrics check failed (phase=$phase)"
+        echo "$logs"
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Exporter now emits complete metrics.
+
+    **Key takeaway:** a scrape target can be "up" while still being wrong.
+    Validate metric *content*, not just endpoint reachability.

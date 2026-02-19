@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-log-mystery
+  labels:
+    app: jerry-log-mystery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-log-mystery
+  template:
+    metadata:
+      labels:
+        app: jerry-log-mystery
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          env:
+            - name: APP_MODE
+              value: production
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "booting app container"
+              if [ "$APP_MODE" != "prod" ]; then
+                echo "FATAL: APP_MODE must be prod, got $APP_MODE"
+                exit 1
+              fi
+              echo "api ready"
+              while true; do sleep 30; done
+        - name: log-shipper
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              while true; do
+                echo "log-shipper heartbeat"
+                sleep 10
+              done

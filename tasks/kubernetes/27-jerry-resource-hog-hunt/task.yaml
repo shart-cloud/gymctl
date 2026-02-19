@@ -1,0 +1,155 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-resource-hog-hunt
+  title: "Jerry's Resource Hog Hunt"
+  track: k8s-troubleshooting
+  week: 8
+  order: 4
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 140
+
+  description: |
+    Jerry says "the cluster feels slow" but gave zero useful details. Two
+    workloads are running, and one is consuming far more CPU than expected.
+
+    Observability basics are already in place for this lab. Use live
+    metrics to find the noisy workload, then apply sane CPU/memory requests and
+    limits so the cluster can recover.
+
+  learningOutcomes:
+    - "Use metrics-server and kubectl top for live resource triage"
+    - "Identify noisy workloads by CPU usage"
+    - "Apply right-sized requests and limits to noisy deployments"
+
+  tags:
+    - cka
+    - troubleshooting
+    - metrics-server
+    - resources
+    - performance
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/metrics-server.yaml
+        - setup/hog-deployment.yaml
+        - setup/baseline-deployment.yaml
+      waitFor:
+        - resource: deployment/jerry-hog
+          condition: available
+          timeout: 180s
+        - resource: deployment/jerry-baseline
+          condition: available
+          timeout: 180s
+    customSetup:
+      - type: script
+        timeout: 240s
+        script: |
+          set -e
+          kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s
+
+          for i in $(seq 1 90); do
+            if kubectl top nodes >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "metrics-server API did not become ready"
+          exit 1
+
+  checks:
+    - name: "kubectl top works and shows jerry-hog"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 60); do
+          out=$(kubectl top pods 2>/dev/null || true)
+          if echo "$out" | grep -q '^jerry-hog-'; then
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "FAIL: jerry-hog not visible in kubectl top output"
+        exit 1
+      expectExitCode: 0
+
+    - name: "jerry-hog has CPU request"
+      type: jsonpath
+      resource: deployment/jerry-hog
+      jsonpath: "{.spec.template.spec.containers[0].resources.requests.cpu}"
+      operator: regex
+      value: "^[0-9]+m$|^[0-9]+$"
+
+    - name: "jerry-hog has CPU limit"
+      type: jsonpath
+      resource: deployment/jerry-hog
+      jsonpath: "{.spec.template.spec.containers[0].resources.limits.cpu}"
+      operator: regex
+      value: "^[0-9]+m$|^[0-9]+$"
+
+    - name: "CPU limit is capped to a sane value"
+      type: jsonpath
+      resource: deployment/jerry-hog
+      jsonpath: "{.spec.template.spec.containers[0].resources.limits.cpu}"
+      operator: lessThan
+      value: "600m"
+      valueType: quantity
+
+    - name: "jerry-hog has memory request"
+      type: jsonpath
+      resource: deployment/jerry-hog
+      jsonpath: "{.spec.template.spec.containers[0].resources.requests.memory}"
+      operator: regex
+      value: "^[0-9]+(Mi|Gi)$"
+
+    - name: "jerry-hog has memory limit"
+      type: jsonpath
+      resource: deployment/jerry-hog
+      jsonpath: "{.spec.template.spec.containers[0].resources.limits.memory}"
+      operator: regex
+      value: "^[0-9]+(Mi|Gi)$"
+
+    - name: "jerry-hog deployment is Available"
+      type: condition
+      resource: deployment/jerry-hog
+      condition: Available
+      status: "True"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Resource incident contained.
+
+    **Key takeaway:** `kubectl top` identifies the blast radius quickly, but
+    stable recovery comes from explicit requests and limits.
+
+  tasking:
+    ticket: "OPS-2091"
+    priority: "P1"
+    summary: "Cluster is sluggish due to an unknown workload"
+    description: |
+      We have node pressure alerts and noisy-neighbor symptoms. Jerry deployed a
+      CPU burner and forgot to set resource boundaries. Identify the offender
+      with metrics and harden the workload spec.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "everything looks fine to me, maybe kubernetes is just slow today"
+    onCheckFail: "i only deployed two tiny pods, how bad could it be"
+    onHintUsed: "wait, kubectl can show live cpu per pod"
+    onComplete: "okay okay, no more unlimited while-true loops"

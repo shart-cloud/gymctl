@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-hpa-web
+  labels:
+    app: jerry-hpa-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-hpa-web
+  template:
+    metadata:
+      labels:
+        app: jerry-hpa-web
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-context-app
+  labels:
+    app: jerry-context-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-context-app
+  template:
+    metadata:
+      labels:
+        app: jerry-context-app
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10

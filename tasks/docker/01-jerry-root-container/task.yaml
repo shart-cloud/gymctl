@@ -76,3 +76,19 @@ spec:
     Great work! Jerry's container now runs as a non-root user.
 
     **Key takeaway:** Use USER to drop root privileges in containers.
+
+  tasking:
+    ticket: "SEC-0042"
+    priority: "P1"
+    summary: "Container running as root, security team escalating"
+    description: |
+      Jerry's deployment is running with full root privileges inside the container.
+      The security team has flagged this in the last audit and the SLA for remediation
+      expires at end of sprint. This is not optional. Fix the Dockerfile.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "i mean technically root just means it has more permissions, that's a good thing right"
+    onCheckFail: "okay but it built successfully though so that's something"
+    onHintUsed: "i definitely would have figured that out eventually"
+    onComplete: "okay yeah i see it now, that probably was bad"

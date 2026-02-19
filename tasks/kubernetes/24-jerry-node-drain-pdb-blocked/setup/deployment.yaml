@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-drain-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: jerry-drain-app
+  template:
+    metadata:
+      labels:
+        app: jerry-drain-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.27
+        ports:
+        - containerPort: 80

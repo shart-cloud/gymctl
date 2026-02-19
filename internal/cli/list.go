@@ -59,16 +59,22 @@ func newListCmd() *cobra.Command {
 				return ai.Metadata.Name < aj.Metadata.Name
 			})
 
-			// Count completed exercises
+			// Count completed and in-progress exercises
 			completedCount := 0
+			inProgressCount := 0
 			for _, entry := range filtered {
-				if status, ok := progressFile.Exercises[entry.Exercise.Metadata.Name]; ok && status.Status == "completed" {
+				st := progressFile.Exercises[entry.Exercise.Metadata.Name]
+				switch st.Status {
+				case "completed":
 					completedCount++
+				case "in_progress", "started":
+					inProgressCount++
 				}
 			}
 
-			ColorHeader.Fprintln(cmd.OutOrStdout(), "🎯 Available Exercises")
-			ColorDim.Fprintf(cmd.OutOrStdout(), "%d exercises total, %d completed\n", len(filtered), completedCount)
+			// GRIM sprint header
+			ColorTrack.Fprintf(cmd.OutOrStdout(), "  GRIM-9 · Sprint Overview")
+			ColorDim.Fprintf(cmd.OutOrStdout(), "  ·  %d/%d complete  ·  %d in progress\n", completedCount, len(filtered), inProgressCount)
 
 			currentTrack := ""
 			for _, entry := range filtered {
@@ -79,9 +85,17 @@ func newListCmd() *cobra.Command {
 					ColorTrack.Fprintf(cmd.OutOrStdout(), "▸ %s\n", strings.ToUpper(currentTrack))
 				}
 
+				// Determine lock state: exercise is locked if any prereqs are not completed
+				locked, missingPrereqs := isExerciseLocked(exercise, progressFile)
+
 				// Get status icon
-				status := progressFile.Exercises[exercise.Metadata.Name]
-				statusIcon := FormatStatus(status.Status)
+				var statusIcon string
+				if locked {
+					statusIcon = ColorDim.Sprint("◌")
+				} else {
+					status := progressFile.Exercises[exercise.Metadata.Name]
+					statusIcon = FormatStatus(status.Status)
+				}
 
 				desc := firstLine(exercise.Spec.Description)
 				estimated := exercise.Spec.EstimatedTime
@@ -97,13 +111,23 @@ func newListCmd() *cobra.Command {
 				// Format difficulty with color
 				diffBadge := DifficultyBadge(exercise.Spec.Difficulty)
 
-				// Print the formatted line
-				fmt.Fprintf(cmd.OutOrStdout(), "  %s %s %6s  %s\n",
-					nameWithStatus,
-					diffBadge,
-					estimated,
-					ColorDim.Sprint(desc),
-				)
+				if locked {
+					// Dim the whole line and append lock indicator
+					needs := ColorDim.Sprintf("[needs: %s]", strings.Join(missingPrereqs, ", "))
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s %s %6s  %s\n",
+						ColorDim.Sprint(nameWithStatus),
+						ColorDim.Sprint(diffBadge),
+						ColorDim.Sprint(estimated),
+						needs,
+					)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s %s %6s  %s\n",
+						nameWithStatus,
+						diffBadge,
+						estimated,
+						ColorDim.Sprint(desc),
+					)
+				}
 			}
 
 			// Add a summary footer
@@ -124,6 +148,19 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().IntVar(&opts.week, "week", 0, "Filter by week")
 
 	return cmd
+}
+
+// isExerciseLocked returns true if the exercise has prerequisites that are not completed.
+// The second return value lists the missing prerequisite names.
+func isExerciseLocked(exercise *scenario.Exercise, pf *progress.File) (bool, []string) {
+	var missing []string
+	for _, prereq := range exercise.Spec.Prerequisites {
+		st := pf.Exercises[prereq]
+		if st.Status != "completed" {
+			missing = append(missing, prereq)
+		}
+	}
+	return len(missing) > 0, missing
 }
 
 func filterList(entries []scenario.CatalogEntry, opts *listOptions) []scenario.CatalogEntry {

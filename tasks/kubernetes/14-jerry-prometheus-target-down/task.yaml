@@ -1,0 +1,122 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-prometheus-target-down
+  title: "Jerry's Prometheus Target Down"
+  track: k8s-observability
+  week: 7
+  order: 2
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 130
+
+  description: |
+    Prometheus is running, but Jerry's exporter target is DOWN.
+    The scrape config points to the right DNS name, but service discovery is broken.
+
+    Fix the service wiring so Prometheus reports the target as healthy.
+
+  learningOutcomes:
+    - "Troubleshoot Prometheus target health end-to-end"
+    - "Correlate Service selectors with endpoint discovery"
+    - "Validate scrape status through Prometheus API"
+
+  tags:
+    - observability
+    - prometheus
+    - service-discovery
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/target-deployment.yaml
+        - setup/target-service.yaml
+        - setup/prometheus-configmap.yaml
+        - setup/prometheus-deployment.yaml
+        - setup/prometheus-service.yaml
+      waitFor:
+        - resource: deployment/metrics-target
+          condition: available
+          timeout: 120s
+        - resource: deployment/prometheus
+          condition: available
+          timeout: 180s
+
+  checks:
+    - name: "Exporter service selector is correct"
+      type: jsonpath
+      resource: service/metrics-exporter
+      jsonpath: "{.spec.selector.app}"
+      operator: equals
+      value: "metrics-target"
+
+    - name: "Exporter service has endpoints"
+      type: script
+      script: |
+        set -e
+        endpoints=$(kubectl get endpoints metrics-exporter -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
+        if [ -z "$endpoints" ]; then
+          echo "FAIL: metrics-exporter has no endpoints"
+          exit 1
+        fi
+        echo "OK: endpoints=$endpoints"
+      expectExitCode: 0
+
+    - name: "Prometheus reports jerry-exporter target up"
+      type: script
+      script: |
+        set -e
+        kubectl delete pod prom-target-check --ignore-not-found >/dev/null 2>&1 || true
+        kubectl run prom-target-check --image=busybox:1.36 --restart=Never --command -- sh -c '
+          for i in $(seq 1 30); do
+            body=$(wget -qO- -T 5 http://prometheus:9090/api/v1/targets 2>/dev/null || true)
+            echo "$body" | grep -q "\"job\":\"jerry-exporter\"" || { sleep 2; continue; }
+            echo "$body" | grep -q "metrics-exporter.default.svc.cluster.local:8080" || { sleep 2; continue; }
+            echo "$body" | grep -q "\"health\":\"up\"" && exit 0
+            sleep 2
+          done
+          exit 1
+        '
+
+        for i in $(seq 1 40); do
+          phase=$(kubectl get pod prom-target-check -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ]; then
+            break
+          fi
+          sleep 1
+        done
+
+        phase=$(kubectl get pod prom-target-check -o jsonpath='{.status.phase}' 2>/dev/null || true)
+        logs=$(kubectl logs prom-target-check 2>/dev/null || true)
+        kubectl delete pod prom-target-check --ignore-not-found >/dev/null 2>&1 || true
+
+        if [ "$phase" = "Succeeded" ]; then
+          echo "OK: target is up"
+          exit 0
+        fi
+
+        echo "FAIL: Prometheus still sees target down"
+        echo "$logs"
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Prometheus target recovered.
+
+    **Key takeaway:** target health depends on the full chain:
+    scrape config -> service DNS -> service selector -> pod endpoints.

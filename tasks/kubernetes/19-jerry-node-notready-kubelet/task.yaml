@@ -1,0 +1,137 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-node-notready-kubelet
+  title: "Jerry's Node Went NotReady"
+  track: k8s-troubleshooting
+  week: 8
+  order: 2
+
+spec:
+  difficulty: advanced
+  estimatedTime: 30m
+  points: 150
+
+  description: |
+    Jerry stopped kubelet on the only node while preparing maintenance.
+    The node is now NotReady/Unknown and workload rollout is stuck.
+
+    Recover the node and get workloads scheduling again.
+
+  learningOutcomes:
+    - "Diagnose node NotReady symptoms from node status and events"
+    - "Recover kubelet on a failed node"
+    - "Validate workload scheduling after node recovery"
+
+  tags:
+    - troubleshooting
+    - nodes
+    - kubelet
+    - cluster-components
+    - scheduling
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+      waitFor:
+        - resource: deployment/jerry-node-app
+          condition: available
+          timeout: 120s
+    customSetup:
+      - type: script
+        timeout: 180s
+        script: |
+          set -e
+          node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+
+          docker exec "$node" systemctl stop kubelet
+          kubectl rollout restart deployment/jerry-node-app -n default
+
+          for i in $(seq 1 120); do
+            if ! ready=$(kubectl get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null); then
+              sleep 1
+              continue
+            fi
+            if [ "$ready" = "False" ] || [ "$ready" = "Unknown" ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "node did not transition away from Ready after kubelet stop"
+          exit 1
+
+  checks:
+    - name: "Node reports Ready=True again"
+      type: script
+      script: |
+        set -e
+        node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+        ready=$(kubectl get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+        [ "$ready" = "True" ]
+      expectExitCode: 0
+
+    - name: "kubelet service is active on node"
+      type: script
+      script: |
+        set -e
+        node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+        state=$(docker exec "$node" systemctl is-active kubelet 2>/dev/null || true)
+        [ "$state" = "active" ]
+      expectExitCode: 0
+
+    - name: "Node does not have not-ready/unreachable taints"
+      type: script
+      script: |
+        set -e
+        node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+        taints=$(kubectl get node "$node" -o jsonpath='{.spec.taints[*].key}' 2>/dev/null || true)
+        echo "$taints" | tr ' ' '\n' | grep -Eq '^(node.kubernetes.io/not-ready|node.kubernetes.io/unreachable)$' && exit 1
+        exit 0
+      expectExitCode: 0
+
+    - name: "Deployment is Available"
+      type: condition
+      resource: deployment/jerry-node-app
+      condition: Available
+      status: "True"
+
+    - name: "Can schedule a short-lived pod"
+      type: script
+      script: |
+        set -e
+        kubectl delete pod node-recovery-probe --ignore-not-found >/dev/null 2>&1 || true
+        kubectl run node-recovery-probe --image=registry.k8s.io/pause:3.10 --restart=Never >/dev/null
+
+        for i in $(seq 1 40); do
+          phase=$(kubectl get pod node-recovery-probe -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Running" ] || [ "$phase" = "Failed" ]; then
+            break
+          fi
+          sleep 1
+        done
+
+        phase=$(kubectl get pod node-recovery-probe -o jsonpath='{.status.phase}' 2>/dev/null || true)
+        kubectl delete pod node-recovery-probe --ignore-not-found >/dev/null 2>&1 || true
+
+        [ "$phase" = "Running" ] || { echo "phase=$phase"; exit 1; }
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Node recovered and scheduling is healthy again.
+
+    **Key takeaway:** when a node flips NotReady, verify kubelet health first,
+    then confirm both node status and actual workload scheduling recovery.

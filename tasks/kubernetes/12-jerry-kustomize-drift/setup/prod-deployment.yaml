@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: course-web
+  namespace: kustomize-prod
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: course-web-v2
+  template:
+    metadata:
+      labels:
+        app: course-web-v2
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.25
+          env:
+            - name: APP_MODE
+              value: prod
+          ports:
+            - containerPort: 80

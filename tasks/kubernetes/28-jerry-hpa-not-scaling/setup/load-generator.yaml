@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: load-generator
+  labels:
+    app: load-generator
+spec:
+  containers:
+  - name: load-gen
+    image: busybox:1.35
+    command:
+    - /bin/sh
+    - -c
+    - |
+      echo "Starting load generator..."
+      while true; do
+        wget -q -O- http://jerry-app-svc/ >/dev/null 2>&1 || true
+        sleep 0.1
+      done
+  restartPolicy: Always

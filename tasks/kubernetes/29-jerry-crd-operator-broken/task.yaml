@@ -1,0 +1,113 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-crd-operator-broken
+  title: "Jerry's Application Never Syncs"
+  track: k8s-troubleshooting
+  week: 8
+  order: 29
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 125
+
+  description: |
+    Jerry installed ArgoCD and created an Application resource, but it never syncs.
+    The Application shows "Unknown" status and the sync never happens.
+
+    After some debugging, you discover Jerry accidentally scaled the ArgoCD
+    application controller to 0 replicas during cleanup. The CRD exists but
+    nothing is watching it.
+
+    Fix the operator so the Application starts reconciling.
+
+  learningOutcomes:
+    - "Understand the relationship between CRDs and operators"
+    - "Troubleshoot custom resources that aren't reconciling"
+    - "Identify when operators/controllers are down"
+
+  tags:
+    - troubleshooting
+    - crds
+    - operators
+    - argocd
+    - cluster-architecture
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: argocd
+      customSetup: |
+        # Install ArgoCD
+        kubectl create namespace argocd
+        kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+        # Wait for ArgoCD to be ready
+        kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+        kubectl wait --for=condition=available --timeout=300s deployment/argocd-application-controller -n argocd
+
+        # Create a simple Application
+        kubectl apply -f /setup/jerry-application.yaml
+
+        # Give it a moment to try syncing
+        sleep 10
+
+        # Now break it - scale the application controller to 0
+        kubectl scale deployment argocd-application-controller -n argocd --replicas=0
+
+        # Wait for it to scale down
+        kubectl wait --for=delete pod -l app.kubernetes.io/name=argocd-application-controller -n argocd --timeout=120s
+      setupManifests:
+        - setup/jerry-application.yaml
+
+  checks:
+    - name: "Application CRD exists"
+      type: script
+      script: check/crd-exists.sh
+
+    - name: "ArgoCD application controller is running"
+      type: script
+      script: check/controller-running.sh
+
+    - name: "Application shows Synced status"
+      type: script
+      script: check/application-synced.sh
+
+    - name: "Application has synced recently"
+      type: script
+      script: check/application-recent-sync.sh
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Excellent! Jerry's Application is now syncing properly.
+
+    **Key takeaway:** CRDs define custom resources, but operators/controllers
+    are what make them work. When custom resources aren't reconciling,
+    check if their controllers are running.
+
+  tasking:
+    ticket: "OPS-3142"
+    priority: "P1"
+    summary: "ArgoCD Application stuck in Unknown status, never syncs"
+    description: |
+      Jerry's ArgoCD Application has been stuck in "Unknown" sync status for hours.
+      The Application resource exists but nothing is happening. GitOps is broken.
+
+      This is blocking our deployment pipeline.
+    reporter: "DEVX-12"
+
+  jerryDialog:
+    onStart: "the application yaml looks right, i copied it from the docs"
+    onCheckFail: "argocd is running, i can see the ui, why won't it sync"
+    onHintUsed: "wait there are multiple parts to argocd? i thought it was just one thing"
+    onComplete: "so the crd is just the definition but i need the controller running too?"

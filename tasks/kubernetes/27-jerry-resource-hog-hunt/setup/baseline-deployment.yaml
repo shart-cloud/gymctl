@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-baseline
+  labels:
+    app: jerry-baseline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-baseline
+  template:
+    metadata:
+      labels:
+        app: jerry-baseline
+    spec:
+      containers:
+        - name: baseline
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              while true; do
+                sleep 30
+              done

@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-rollout-app
+  labels:
+    app: jerry-rollout-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jerry-rollout-app
+  template:
+    metadata:
+      labels:
+        app: jerry-rollout-app
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 1

@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-app
+  namespace: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-app
+  template:
+    metadata:
+      labels:
+        app: jerry-app
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.20
+        ports:
+        - containerPort: 80
+        securityContext:
+          # Jerry's broken security context - violates restricted standard
+          privileged: true
+          runAsUser: 0
+          allowPrivilegeEscalation: true

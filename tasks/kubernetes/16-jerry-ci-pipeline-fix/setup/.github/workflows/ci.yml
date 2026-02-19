@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Ruff
+        run: ruff .
+      - name: Run security scan
+        run: echo "bandit temporarily disabled"
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t ghcr.io/example/app:${{ github.sha }} .
+
+  validate_k8s:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate manifests
+        run: kubeconfrm -summary k8s/

@@ -1,0 +1,99 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-kustomize-drift
+  title: "Jerry's Kustomize Drift"
+  track: k8s-ops
+  week: 7
+  order: 2
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 120
+
+  description: |
+    Jerry's dev and prod overlays drifted from the shared base.
+    Dev is healthy, but prod has subtle drift that breaks service wiring.
+
+    Restore prod so it matches the base contract while keeping prod-specific config.
+
+  learningOutcomes:
+    - "Detect overlay drift between environments"
+    - "Align deployment labels/images with shared base expectations"
+    - "Validate service endpoint health after rollout"
+
+  tags:
+    - kustomize
+    - overlays
+    - drift
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/namespaces.yaml
+        - setup/dev-deployment.yaml
+        - setup/prod-deployment.yaml
+        - setup/prod-service.yaml
+    customSetup:
+      - type: script
+        script: |
+          set -e
+          kubectl rollout status deployment/course-web -n kustomize-dev --timeout=120s
+          kubectl rollout status deployment/course-web -n kustomize-prod --timeout=120s
+
+  checks:
+    - name: "Prod deployment uses base image"
+      type: jsonpath
+      namespace: kustomize-prod
+      resource: deployment/course-web
+      jsonpath: "{.spec.template.spec.containers[0].image}"
+      operator: equals
+      value: "nginx:1.27"
+
+    - name: "Prod deployment app label matches service selector"
+      type: jsonpath
+      namespace: kustomize-prod
+      resource: deployment/course-web
+      jsonpath: "{.spec.template.metadata.labels.app}"
+      operator: equals
+      value: "course-web"
+
+    - name: "Prod keeps overlay-specific APP_MODE"
+      type: jsonpath
+      namespace: kustomize-prod
+      resource: deployment/course-web
+      jsonpath: "{.spec.template.spec.containers[0].env[0].value}"
+      operator: equals
+      value: "prod"
+
+    - name: "Prod service has endpoints"
+      type: script
+      script: |
+        set -e
+        endpoints=$(kubectl get endpoints course-web -n kustomize-prod -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
+        if [ -z "$endpoints" ]; then
+          echo "FAIL: service has no endpoints"
+          exit 1
+        fi
+        echo "OK: endpoints=$endpoints"
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Prod drift corrected.
+
+    **Key takeaway:** overlays should only carry intentional differences.
+    If base contracts drift (labels/images), routing and rollout behavior breaks quickly.

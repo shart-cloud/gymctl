@@ -1,0 +1,96 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-argo-out-of-sync
+  title: "Jerry's Argo App Out Of Sync"
+  track: k8s-gitops
+  week: 8
+  order: 2
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 140
+
+  description: |
+    Jerry registered an Argo CD Application, but it cannot converge.
+    The source path is wrong, the destination namespace is wrong, and
+    repo credentials are still using a known bad token.
+
+    Repair the Application configuration so it is ready to sync cleanly.
+
+  learningOutcomes:
+    - "Inspect Argo CD Application resources"
+    - "Fix source path and destination namespace mismatches"
+    - "Rotate broken repository credentials"
+
+  tags:
+    - gitops
+    - argocd
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/crd-application.yaml
+        - setup/namespaces.yaml
+    customSetup:
+      - type: script
+        script: |
+          set -e
+          kubectl apply -f setup/repo-secret.yaml -n argocd
+          kubectl apply -f setup/application.yaml -n argocd
+
+  checks:
+    - name: "Application exists in argocd namespace"
+      type: resourceExists
+      namespace: argocd
+      resource: applications.argoproj.io/jerry-portfolio
+
+    - name: "Application source path is correct"
+      type: jsonpath
+      namespace: argocd
+      resource: applications.argoproj.io/jerry-portfolio
+      jsonpath: "{.spec.source.path}"
+      operator: equals
+      value: "k8s/overlays/local"
+
+    - name: "Application destination namespace is corrected"
+      type: jsonpath
+      namespace: argocd
+      resource: applications.argoproj.io/jerry-portfolio
+      jsonpath: "{.spec.destination.namespace}"
+      operator: equals
+      value: "portfolio-dev"
+
+    - name: "Target namespace exists"
+      type: script
+      script: |
+        kubectl get namespace portfolio-dev >/dev/null 2>&1
+      expectExitCode: 0
+
+    - name: "Repo credential token was rotated"
+      type: jsonpath
+      namespace: argocd
+      resource: secret/repo-creds
+      jsonpath: "{.data.password}"
+      operator: notEquals
+      value: "YmFkLXRva2Vu"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Application configuration repaired.
+
+    **Key takeaway:** most Argo "out of sync" incidents start with config drift:
+    wrong source path, wrong target namespace, or stale credentials.

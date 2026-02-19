@@ -295,14 +295,14 @@ func getSystemChecks() []diagnosticCheck {
 			Category: "Network",
 			Required: false,
 			Check: func(ctx context.Context) (bool, string, string) {
-				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 				defer cancel()
 
-				cmd := exec.CommandContext(ctx, "docker", "pull", "alpine:latest")
+				cmd := exec.CommandContext(ctx, "docker", "manifest", "inspect", "alpine:latest")
 				if err := cmd.Run(); err != nil {
-					return false, "Cannot pull images from Docker Hub", "Check internet connection and proxy settings"
+					return false, "Cannot reach Docker Hub", "Check internet connection and proxy settings"
 				}
-				return true, "Docker Hub is accessible", ""
+				return true, "Docker Hub is reachable", ""
 			},
 		},
 	}

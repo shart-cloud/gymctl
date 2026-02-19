@@ -1,0 +1,96 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-pod-wont-spread
+  title: "Jerry's Pods Won't Spread"
+  track: k8s-admin
+  week: 7
+  order: 1
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 140
+
+  description: |
+    Jerry deployed a highly-available service with 4 replicas, but all pods
+    are landing on the same node. This defeats the purpose of having multiple
+    replicas for availability.
+
+    Fix the deployment so pods spread across at least 2 different nodes
+    without changing the replica count.
+
+  learningOutcomes:
+    - "Configure podAntiAffinity for high availability"
+    - "Use topologySpreadConstraints for balanced distribution"
+    - "Troubleshoot pod scheduling and placement"
+
+  tags:
+    - scheduling
+    - affinity
+    - high-availability
+    - pod-placement
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+      waitFor:
+        - resource: deployment/jerry-ha-app
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "Deployment still has 4 replicas"
+      type: jsonpath
+      resource: deployment/jerry-ha-app
+      namespace: default
+      jsonpath: "{.spec.replicas}"
+      expectedValue: "4"
+
+    - name: "All pods are running"
+      type: script
+      script: |
+        set -e
+        running_count=$(kubectl get pods -l app=jerry-ha-app --field-selector=status.phase=Running -o name | wc -l)
+        [ "$running_count" -eq 4 ]
+      expectExitCode: 0
+
+    - name: "Pods are spread across at least 2 nodes"
+      type: script
+      script: |
+        set -e
+        # Get unique node names where pods are running
+        node_count=$(kubectl get pods -l app=jerry-ha-app -o jsonpath='{.items[*].spec.nodeName}' | tr ' ' '\n' | sort -u | wc -l)
+        [ "$node_count" -ge 2 ]
+      expectExitCode: 0
+
+    - name: "Pod placement constraint is configured"
+      type: script
+      script: |
+        set -e
+        # Check for either podAntiAffinity or topologySpreadConstraints
+        has_antiaffinity=$(kubectl get deployment jerry-ha-app -o jsonpath='{.spec.template.spec.affinity.podAntiAffinity}' | wc -c)
+        has_topology_spread=$(kubectl get deployment jerry-ha-app -o jsonpath='{.spec.template.spec.topologySpreadConstraints}' | wc -c)
+
+        # At least one should be configured (non-empty)
+        [ "$has_antiaffinity" -gt 2 ] || [ "$has_topology_spread" -gt 2 ]
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Excellent! Jerry's high-availability app now spreads across multiple nodes.
+
+    **Key takeaway:** Use podAntiAffinity or topologySpreadConstraints to ensure
+    replicas don't cluster on a single node, improving resilience to node failures.

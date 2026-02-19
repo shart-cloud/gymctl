@@ -1,0 +1,112 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-node-drain-pdb-blocked
+  title: "Jerry's Node Drain Blocked by PDB"
+  track: k8s-troubleshooting
+  week: 7
+  order: 2
+
+spec:
+  difficulty: advanced
+  estimatedTime: 30m
+  points: 150
+
+  description: |
+    Jerry is trying to drain a worker for maintenance, but the drain operation
+    is blocked by PodDisruptionBudget constraints.
+
+    Adjust disruption policy safely so node maintenance can proceed without
+    leaving the workload unhealthy.
+
+  learningOutcomes:
+    - "Diagnose drain failures caused by PodDisruptionBudget settings"
+    - "Tune PDB policy to permit controlled maintenance"
+    - "Validate node lifecycle commands and workload recovery"
+
+  tags:
+    - troubleshooting
+    - node-maintenance
+    - drain
+    - pdb
+    - scheduling
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      kindConfig: |
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        nodes:
+        - role: control-plane
+        - role: worker
+        - role: worker
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+        - setup/pdb.yaml
+      waitFor:
+        - resource: deployment/jerry-drain-app
+          condition: available
+          timeout: 180s
+    customSetup:
+      - type: script
+        timeout: 180s
+        script: |
+          set -e
+          target=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.metadata.labels.node-role\.kubernetes\.io/control-plane}{"\n"}{end}' | awk '$2=="" {print $1; exit}')
+          [ -n "$target" ] || { echo "no worker node found"; exit 1; }
+          kubectl label node "$target" jerry.gym/drain-target=true --overwrite
+
+  checks:
+    - name: "Target worker node is labeled"
+      type: script
+      script: |
+        set -e
+        node=$(kubectl get nodes -l jerry.gym/drain-target=true -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        [ -n "$node" ]
+      expectExitCode: 0
+
+    - name: "PDB now allows at least one disruption"
+      type: script
+      script: |
+        set -e
+        allowed=$(kubectl get pdb jerry-drain-pdb -o jsonpath='{.status.disruptionsAllowed}' 2>/dev/null || true)
+        [ -n "$allowed" ] || allowed=0
+        [ "$allowed" -ge 1 ]
+      expectExitCode: 0
+
+    - name: "Drain + uncordon succeeds for target node"
+      type: script
+      script: |
+        set -e
+        node=$(kubectl get nodes -l jerry.gym/drain-target=true -o jsonpath='{.items[0].metadata.name}')
+
+        kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --timeout=180s
+        kubectl uncordon "$node"
+
+        unsched=$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}' 2>/dev/null || true)
+        [ -z "$unsched" ] || [ "$unsched" = "false" ]
+      expectExitCode: 0
+
+    - name: "Workload returns to Available"
+      type: condition
+      resource: deployment/jerry-drain-app
+      condition: Available
+      status: "True"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Maintenance flow restored.
+
+    **Key takeaway:** PDBs protect uptime, but if they are too strict, node
+    maintenance stops. Tune disruptions deliberately, then verify recovery.

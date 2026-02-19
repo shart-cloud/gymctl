@@ -11,9 +11,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"gymctl/internal/dialogue"
 	"gymctl/internal/environment"
 	"gymctl/internal/progress"
 	"gymctl/internal/scenario"
+	"gymctl/internal/ui"
 )
 
 type startOptions struct {
@@ -107,6 +109,15 @@ func newStartCmd() *cobra.Command {
 						return err
 					}
 				}
+
+				if len(exercise.Spec.Environment.CustomSetup) > 0 {
+					err = WithSpinner("Running custom setup steps", func() error {
+						return environment.RunCustomSetup(ctx, entry.Dir, exercise.Spec.Environment.CustomSetup)
+					})
+					if err != nil {
+						return err
+					}
+				}
 			case "docker":
 				if exercise.Spec.Environment.Docker == nil {
 					return fmt.Errorf("missing docker environment config")
@@ -126,6 +137,10 @@ func newStartCmd() *cobra.Command {
 				return fmt.Errorf("unsupported environment type: %s", exercise.Spec.Environment.Type)
 			}
 
+			ui.RenderGRIMTicket(cmd.OutOrStdout(), exercise.Spec.Tasking, exercise.Metadata.Name, exercise.Spec.Description)
+			fmt.Fprintln(cmd.OutOrStdout())
+			dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(exercise.Spec.JerryDialog, "onStart", exercise.Metadata.Name))
+			fmt.Fprintln(cmd.OutOrStdout())
 			printExerciseIntro(cmd, exercise)
 
 			if err := markStarted(exercise); err != nil {

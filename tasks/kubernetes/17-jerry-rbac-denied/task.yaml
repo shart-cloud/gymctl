@@ -1,0 +1,106 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-rbac-denied
+  title: "Jerry's RBAC Access Denied"
+  track: k8s-admin
+  week: 4
+  order: 6
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 130
+
+  description: |
+    Jerry created a ServiceAccount for automation, but RBAC is too restrictive.
+    The account should be able to inspect pods and pod logs in the default
+    namespace, but access is denied.
+
+    Repair the RBAC policy while keeping least privilege.
+
+  learningOutcomes:
+    - "Troubleshoot authorization failures with kubectl auth can-i"
+    - "Grant least-privilege read access with Role and RoleBinding"
+    - "Validate effective permissions through impersonation"
+
+  tags:
+    - rbac
+    - authorization
+    - troubleshooting
+    - security
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/serviceaccount.yaml
+        - setup/role.yaml
+        - setup/rolebinding.yaml
+        - setup/deployment.yaml
+      waitFor:
+        - resource: deployment/jerry-rbac-app
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "Role exists"
+      type: resourceExists
+      resource: role/jerry-readonly
+
+    - name: "RoleBinding targets the jerry-dev ServiceAccount"
+      type: script
+      script: |
+        set -e
+        subject=$(kubectl get rolebinding jerry-readonly-binding -n default -o jsonpath='{.subjects[0].name}')
+        kind=$(kubectl get rolebinding jerry-readonly-binding -n default -o jsonpath='{.subjects[0].kind}')
+        [ "$kind" = "ServiceAccount" ] && [ "$subject" = "jerry-dev" ]
+      expectExitCode: 0
+
+    - name: "ServiceAccount can list pods"
+      type: script
+      script: |
+        set -e
+        can_list=$(kubectl auth can-i list pods -n default --as=system:serviceaccount:default:jerry-dev)
+        [ "$can_list" = "yes" ]
+      expectExitCode: 0
+
+    - name: "ServiceAccount can get pod logs"
+      type: script
+      script: |
+        set -e
+        can_logs=$(kubectl auth can-i get pods/log -n default --as=system:serviceaccount:default:jerry-dev)
+        [ "$can_logs" = "yes" ]
+      expectExitCode: 0
+
+    - name: "ServiceAccount still cannot delete pods"
+      type: script
+      script: |
+        set -e
+        can_delete=$(kubectl auth can-i delete pods -n default --as=system:serviceaccount:default:jerry-dev)
+        [ "$can_delete" = "no" ]
+      expectExitCode: 0
+
+    - name: "Impersonated pod query succeeds"
+      type: script
+      script: |
+        set -e
+        kubectl --as=system:serviceaccount:default:jerry-dev get pods -n default >/dev/null
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Nice work. Jerry's automation account can read what it needs and no more.
+
+    **Key takeaway:** use `kubectl auth can-i` with impersonation to validate
+    real permissions, then grant the smallest role that unblocks the task.

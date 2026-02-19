@@ -1,0 +1,102 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-wrong-cni-config
+  title: "Jerry's Wrong CNI Config"
+  track: k8s-troubleshooting
+  week: 4
+  order: 8
+
+spec:
+  difficulty: advanced
+  estimatedTime: 30m
+  points: 160
+
+  description: |
+    Jerry accidentally corrupted the CNI configuration on one of the cluster nodes.
+    New pods created on that node get stuck in ContainerCreating state because
+    they can't get IP addresses assigned.
+
+    Identify the problematic node and restore the CNI configuration so new pods
+    can start successfully.
+
+  learningOutcomes:
+    - "Understand CNI configuration and its impact on pod networking"
+    - "Troubleshoot pod networking failures at the node level"
+    - "Restore CNI configuration files from working nodes"
+
+  tags:
+    - cni
+    - networking
+    - troubleshooting
+    - node-configuration
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/test-deployment.yaml
+      waitFor:
+        - resource: deployment/network-test
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "Test deployment is running"
+      type: condition
+      resource: deployment/network-test
+      namespace: default
+      condition: available
+      timeout: 60s
+
+    - name: "New pods can be created successfully"
+      type: script
+      script: |
+        set -e
+        # Create a test pod and verify it reaches Running state
+        kubectl run cni-verify-pod --image=nginx:1.20 --rm -i --restart=Never --timeout=60s -- echo "CNI working"
+      expectExitCode: 0
+
+    - name: "CNI configuration exists on all nodes"
+      type: script
+      script: |
+        set -e
+        # Check that CNI config exists on all worker nodes
+        nodes=$(kubectl get nodes -o name | grep -v control-plane)
+        for node in $nodes; do
+          node_name=$(echo $node | cut -d/ -f2)
+          # Use docker exec to check inside kind nodes
+          if docker exec "$node_name" test -f /etc/cni/net.d/10-kindnet.conflist; then
+            echo "CNI config found on $node_name"
+          else
+            echo "CNI config missing on $node_name"
+            exit 1
+          fi
+        done
+      expectExitCode: 0
+
+    - name: "Pod networking functions correctly"
+      type: script
+      script: |
+        set -e
+        # Create a pod and verify it gets an IP address
+        kubectl run ip-test --image=busybox:1.36 --rm -i --restart=Never --timeout=60s -- hostname -i | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 30
+      file: hints/hint-2.md
+    - cost: 60
+      file: hints/hint-3.md
+
+  successMessage: |
+    Excellent troubleshooting! Jerry's CNI configuration is restored and pod networking works.
+
+    **Key takeaway:** CNI configuration files in /etc/cni/net.d/ are critical for pod
+    networking. When they're missing or corrupted, pods can't get IP addresses and
+    remain in ContainerCreating state.

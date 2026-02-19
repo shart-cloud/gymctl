@@ -1,0 +1,100 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-rollout-stuck
+  title: "Jerry's Rollout Is Stuck"
+  track: k8s-fundamentals
+  week: 4
+  order: 8
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 120
+
+  description: |
+    Jerry pushed a deployment update and now rollout never completes. Pods are
+    running, but they never become Ready, so availability stays broken.
+
+    Repair the deployment so rollout finishes and all replicas become healthy.
+
+  learningOutcomes:
+    - "Diagnose rollout failures with deployment conditions"
+    - "Debug readiness-probe misconfiguration"
+    - "Validate rollout completion and replica health"
+
+  tags:
+    - cka
+    - deployments
+    - rollout
+    - probes
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+
+  checks:
+    - name: "Readiness probe path is corrected"
+      type: jsonpath
+      resource: deployment/jerry-rollout-app
+      jsonpath: "{.spec.template.spec.containers[0].readinessProbe.httpGet.path}"
+      operator: equals
+      value: "/"
+
+    - name: "Rollout completes"
+      type: script
+      script: |
+        set -e
+        kubectl rollout status deployment/jerry-rollout-app --timeout=120s >/dev/null
+      expectExitCode: 0
+
+    - name: "Deployment reports Available"
+      type: condition
+      resource: deployment/jerry-rollout-app
+      condition: Available
+      status: "True"
+
+    - name: "All desired replicas are Ready"
+      type: script
+      script: |
+        set -e
+        desired=$(kubectl get deployment jerry-rollout-app -o jsonpath='{.spec.replicas}')
+        ready=$(kubectl get deployment jerry-rollout-app -o jsonpath='{.status.readyReplicas}')
+        [ "${ready:-0}" -eq "$desired" ]
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Rollout recovered.
+
+    **Key takeaway:** `Running` does not mean `Ready`. Rollout health depends
+    on readiness checks passing for the new pod template.
+
+  tasking:
+    ticket: "OPS-2108"
+    priority: "P1"
+    summary: "Deployment rollout blocked by readiness failures"
+    description: |
+      Jerry's release is stalled and `kubectl rollout status` never finishes.
+      Pods start, but service readiness never transitions to healthy. Repair the
+      deployment spec so rollout can complete.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "pods are running, so i thought rollout was done"
+    onCheckFail: "ready and running sound basically the same to me"
+    onHintUsed: "i probably messed up that probe path"
+    onComplete: "got it, rollout depends on readiness not just process start"

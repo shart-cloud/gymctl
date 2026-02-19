@@ -84,3 +84,19 @@ spec:
     **Key takeaway:** Always set resource requests and limits.
     - Requests guarantee resources for scheduling
     - Limits prevent runaway resource consumption
+
+  tasking:
+    ticket: "OPS-1138"
+    priority: "P0"
+    summary: "Node memory pressure, pods being evicted, Jerry did this"
+    description: |
+      Jerry deployed to production without resource requests or limits.
+      The node is at 94% memory utilization and the kubelet has started evicting
+      lower-priority pods. Other teams are affected. This is a P0 until resolved.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "i pushed the defaults, i thought kubernetes handled all that automatically"
+    onCheckFail: "the pod is running though, running pods are fine"
+    onHintUsed: "what even is a millicore"
+    onComplete: "so every deployment needs that? every single one?"

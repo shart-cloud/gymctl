@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-exporter
+  labels:
+    app: jerry-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-exporter
+  template:
+    metadata:
+      labels:
+        app: jerry-exporter
+    spec:
+      containers:
+        - name: exporter
+          image: python:3.12-alpine
+          command: ["python", "/app/app.py"]
+          env:
+            - name: EMIT_GUESTBOOK
+              value: "false"
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: app-script
+              mountPath: /app
+      volumes:
+        - name: app-script
+          configMap:
+            name: exporter-script

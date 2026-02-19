@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: exporter-script
+data:
+  app.py: |
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import os
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != "/metrics":
+                self.send_response(404)
+                self.end_headers()
+                return
+
+            lines = [
+                "# HELP course_visits_total Total number of visits",
+                "# TYPE course_visits_total counter",
+                "course_visits_total 42",
+            ]
+
+            if os.getenv("EMIT_GUESTBOOK", "false").lower() == "true":
+                lines.extend([
+                    "# HELP course_guestbook_entries Total guestbook entries",
+                    "# TYPE course_guestbook_entries gauge",
+                    "course_guestbook_entries 7",
+                ])
+
+            body = "\n".join(lines) + "\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body.encode())
+
+    HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

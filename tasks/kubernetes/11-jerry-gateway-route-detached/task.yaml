@@ -1,0 +1,103 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-gateway-route-detached
+  title: "Jerry's Gateway Route Detached"
+  track: k8s-networking
+  week: 6
+  order: 4
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 130
+
+  description: |
+    Jerry wrote an HTTPRoute for the app, but it is not attached to the
+    intended shared Gateway. The backend Service is fine; the route reference is not.
+
+    Fix the HTTPRoute parent reference so it targets the correct shared Gateway.
+
+  learningOutcomes:
+    - "Inspect Gateway API objects and parentRefs"
+    - "Troubleshoot route attachment mistakes"
+    - "Validate backendRefs in HTTPRoute"
+
+  tags:
+    - networking
+    - gateway-api
+    - httproute
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+        - setup/service.yaml
+      waitFor:
+        - resource: deployment/jerry-route-app
+          condition: available
+          timeout: 120s
+    customSetup:
+      - type: script
+        script: |
+          set -e
+
+          if ! kubectl get crd gateways.gateway.networking.k8s.io >/dev/null 2>&1; then
+            kubectl apply -f setup/crd-gateway.yaml
+          fi
+
+          if ! kubectl get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
+            kubectl apply -f setup/crd-httproute.yaml
+          fi
+
+          kubectl wait --for=condition=Established crd/gateways.gateway.networking.k8s.io --timeout=60s
+          kubectl wait --for=condition=Established crd/httproutes.gateway.networking.k8s.io --timeout=60s
+
+          kubectl apply -f setup/gateway-namespace.yaml
+          kubectl apply -f setup/gateway.yaml
+          kubectl apply -f setup/httproute.yaml
+
+  checks:
+    - name: "Shared Gateway exists"
+      type: resourceExists
+      namespace: gateway-shared
+      resource: gateway/shared-gateway
+
+    - name: "HTTPRoute parent gateway name is correct"
+      type: jsonpath
+      resource: httproute/jerry-route
+      jsonpath: "{.spec.parentRefs[0].name}"
+      operator: equals
+      value: "shared-gateway"
+
+    - name: "HTTPRoute parent gateway namespace is correct"
+      type: jsonpath
+      resource: httproute/jerry-route
+      jsonpath: "{.spec.parentRefs[0].namespace}"
+      operator: equals
+      value: "gateway-shared"
+
+    - name: "HTTPRoute backend is jerry-route-svc"
+      type: jsonpath
+      resource: httproute/jerry-route
+      jsonpath: "{.spec.rules[0].backendRefs[0].name}"
+      operator: equals
+      value: "jerry-route-svc"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    HTTPRoute now points at the correct shared Gateway.
+
+    **Key takeaway:** a wrong `parentRefs` target can detach an otherwise valid route.

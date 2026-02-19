@@ -1,0 +1,113 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-container-log-mystery
+  title: "Jerry's Multi-Container Log Mystery"
+  track: k8s-troubleshooting
+  week: 8
+  order: 3
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 130
+
+  description: |
+    Jerry shipped a two-container pod. The log sidecar looks healthy, but the
+    workload still fails rollout. One container is masking the other.
+
+    Identify the failing container, use the correct logs, and repair the pod
+    spec so the deployment becomes healthy.
+
+  learningOutcomes:
+    - "Debug multi-container pods with container-specific logs"
+    - "Target the failing container instead of healthy sidecars"
+    - "Patch Deployment container environment safely"
+
+  tags:
+    - cka
+    - troubleshooting
+    - logs
+    - multi-container
+    - deployments
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+
+  checks:
+    - name: "Deployment still has both containers"
+      type: script
+      script: |
+        set -e
+        names=$(kubectl get deployment jerry-log-mystery -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{" "}{end}')
+        echo "$names" | grep -qw app
+        echo "$names" | grep -qw log-shipper
+      expectExitCode: 0
+
+    - name: "App container APP_MODE is corrected"
+      type: jsonpath
+      resource: deployment/jerry-log-mystery
+      jsonpath: "{.spec.template.spec.containers[?(@.name==\"app\")].env[?(@.name==\"APP_MODE\")].value}"
+      operator: equals
+      value: "prod"
+
+    - name: "Deployment becomes Available"
+      type: condition
+      resource: deployment/jerry-log-mystery
+      condition: Available
+      status: "True"
+
+    - name: "App container is no longer crash looping"
+      type: script
+      script: |
+        set -e
+        pod=$(kubectl get pods -l app=jerry-log-mystery -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' | head -n1)
+        [ -n "$pod" ]
+        restarts=$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[?(@.name=="app")].restartCount}')
+        [ "${restarts:-0}" -eq 0 ]
+      expectExitCode: 0
+
+    - name: "App logs show successful startup"
+      type: script
+      script: |
+        set -e
+        pod=$(kubectl get pods -l app=jerry-log-mystery -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' | head -n1)
+        [ -n "$pod" ]
+        kubectl logs "$pod" -c app | grep -q 'api ready'
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Multi-container pod repaired.
+
+    **Key takeaway:** always inspect logs per container (`kubectl logs -c`).
+    Healthy sidecars can hide the real failure.
+
+  tasking:
+    ticket: "OPS-2083"
+    priority: "P1"
+    summary: "Rollout stuck even though one container looks healthy"
+    description: |
+      Jerry says the pod is fine because the log shipper container is running.
+      Production rollout is still blocked. Find the failing container and fix
+      the deployment without removing sidecars.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "the logs are clean... from one of the containers at least"
+    onCheckFail: "log-shipper is up, so app should be up too right"
+    onHintUsed: "i forgot pods can have different logs per container"
+    onComplete: "okay yeah i was tailing the wrong container the whole time"

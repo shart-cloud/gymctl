@@ -1,0 +1,84 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-broken-ingress-host
+  title: "Jerry's Broken Ingress Host"
+  track: k8s-networking
+  week: 6
+  order: 2
+
+spec:
+  difficulty: beginner
+  estimatedTime: 20m
+  points: 100
+
+  description: |
+    Jerry created an Ingress for his app, but the route does not match the
+    expected hostname. The backend app is healthy and the Service is correct,
+    but requests for the intended host will never match.
+
+    Fix the Ingress host rule.
+
+  learningOutcomes:
+    - "Inspect and troubleshoot Ingress rules"
+    - "Understand host-based routing behavior"
+    - "Validate backend wiring in Ingress manifests"
+
+  tags:
+    - networking
+    - ingress
+    - routing
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+        - setup/service.yaml
+        - setup/ingress.yaml
+      waitFor:
+        - resource: deployment/jerry-ingress-app
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "Ingress exists"
+      type: resourceExists
+      resource: ingress/jerry-web
+
+    - name: "Ingress class is nginx"
+      type: jsonpath
+      resource: ingress/jerry-web
+      jsonpath: "{.spec.ingressClassName}"
+      operator: equals
+      value: "nginx"
+
+    - name: "Ingress host is correct"
+      type: jsonpath
+      resource: ingress/jerry-web
+      jsonpath: "{.spec.rules[0].host}"
+      operator: equals
+      value: "jerry.local"
+
+    - name: "Ingress backend points to jerry-ingress-svc"
+      type: jsonpath
+      resource: ingress/jerry-web
+      jsonpath: "{.spec.rules[0].http.paths[0].backend.service.name}"
+      operator: equals
+      value: "jerry-ingress-svc"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Ingress host fixed. Routing rules now match the intended hostname.
+
+    **Key takeaway:** Ingress host matching is exact. One typo can black-hole traffic.

@@ -74,7 +74,7 @@ func runCheck(ctx context.Context, exercise *scenario.Exercise, workDir string, 
 			return runJSONPathCheck(ctx, namespace, check)
 		case "condition":
 			return runConditionCheck(ctx, namespace, check)
-		case "resourceExists":
+		case "resourceExists", "resource":
 			return runResourceExistsCheck(ctx, namespace, check)
 		case "podLogs":
 			return runPodLogsCheck(ctx, namespace, check)
@@ -173,6 +173,8 @@ func runResourceExistsCheck(ctx context.Context, namespace string, check scenari
 	expected := true
 	if check.Exists != nil {
 		expected = *check.Exists
+	} else if check.ShouldExist != nil {
+		expected = *check.ShouldExist
 	}
 
 	if exists == expected {
@@ -458,6 +460,7 @@ func runDockerfileCheck(check scenario.Check, workDir string) Result {
 	userFound := false
 	copyFromFound := false
 	firstFrom := ""
+	lastFrom := ""
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
@@ -466,9 +469,11 @@ func runDockerfileCheck(check scenario.Check, workDir string) Result {
 		upper := strings.ToUpper(trimmed)
 		if strings.HasPrefix(upper, "FROM ") {
 			fromCount++
+			fromImage := strings.TrimSpace(trimmed[5:])
 			if firstFrom == "" {
-				firstFrom = strings.TrimSpace(trimmed[5:])
+				firstFrom = fromImage
 			}
+			lastFrom = fromImage
 		}
 		if strings.HasPrefix(upper, "USER ") {
 			userFound = true
@@ -486,7 +491,7 @@ func runDockerfileCheck(check scenario.Check, workDir string) Result {
 		result.Message = msg
 		return result
 	case "baseImage":
-		passed, msg := compareValue(firstFrom, check.Operator, check.Value, "string")
+		passed, msg := compareValue(lastFrom, check.Operator, check.Value, "string")
 		result.Passed = passed
 		result.Message = msg
 		return result

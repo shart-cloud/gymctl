@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-app
+  labels:
+    app: jerry-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-app
+  template:
+    metadata:
+      labels:
+        app: jerry-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.21-alpine
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        # CPU-intensive workload to trigger scaling
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            # Start nginx in background
+            nginx -g "daemon off;" &
+            # Run CPU-intensive task to generate load
+            while true; do
+              yes > /dev/null &
+              sleep 5
+              killall yes 2>/dev/null || true
+              sleep 2
+            done
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jerry-app-svc
+spec:
+  selector:
+    app: jerry-app
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP

@@ -1,0 +1,91 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-affinity-mismatch
+  title: "Jerry's Affinity Mismatch"
+  track: k8s-admin
+  week: 7
+  order: 2
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 130
+
+  description: |
+    Jerry configured a deployment with required nodeAffinity, but the pod
+    is stuck in Pending state. The affinity rule doesn't match any nodes
+    in the cluster.
+
+    Fix the issue by either updating the affinity rule OR labeling nodes
+    appropriately. The pod must be running and the affinity constraint
+    must still be present (don't just delete it).
+
+  learningOutcomes:
+    - "Troubleshoot nodeAffinity scheduling failures"
+    - "Understand required vs preferred scheduling constraints"
+    - "Fix node selector and affinity mismatches"
+
+  tags:
+    - scheduling
+    - nodeaffinity
+    - troubleshooting
+    - node-labels
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+      waitFor:
+        - resource: deployment/jerry-picky-app
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "Pod is running"
+      type: script
+      script: |
+        set -e
+        running_count=$(kubectl get pods -l app=jerry-picky-app --field-selector=status.phase=Running -o name | wc -l)
+        [ "$running_count" -ge 1 ]
+      expectExitCode: 0
+
+    - name: "NodeAffinity constraint is still present"
+      type: script
+      script: |
+        set -e
+        # Check that some nodeAffinity rule exists
+        affinity=$(kubectl get deployment jerry-picky-app -o jsonpath='{.spec.template.spec.affinity.nodeAffinity}')
+        [ -n "$affinity" ] && [ "$affinity" != "null" ]
+      expectExitCode: 0
+
+    - name: "Required affinity has valid matching nodes"
+      type: script
+      script: |
+        set -e
+        # Extract the label key and value from required affinity
+        label_key=$(kubectl get deployment jerry-picky-app -o jsonpath='{.spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key}')
+        label_value=$(kubectl get deployment jerry-picky-app -o jsonpath='{.spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]}')
+
+        # Check if any node has this label
+        matching_nodes=$(kubectl get nodes -l "$label_key=$label_value" -o name | wc -l)
+        [ "$matching_nodes" -ge 1 ]
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Perfect! Jerry's picky app is now scheduled and the affinity constraint is satisfied.
+
+    **Key takeaway:** Required nodeAffinity must match at least one node, or pods
+    stay Pending. Use `kubectl describe pod` to see scheduling failure events.
