@@ -49,6 +49,9 @@ func init() {
 		newNextCmd(),
 		newWatchCmd(),
 		newShellCmd(),
+		newSSHCmd(),
+		newEnvCmd(),
+		newKubeconfigCmd(),
 		newInfoCmd(),
 	)
 }

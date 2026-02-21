@@ -34,28 +34,58 @@ func newCleanCmd() *cobra.Command {
 			if opts.all {
 				for _, entry := range entries {
 					exercise := entry.Exercise
-					if exercise.Spec.Environment.Type != "docker" || exercise.Spec.Environment.Docker == nil {
-						continue
+					switch exercise.Spec.Environment.Type {
+					case "docker":
+						if exercise.Spec.Environment.Docker == nil {
+							continue
+						}
+						workDir, err := resolveWorkDir(exercise.Metadata.Name)
+						if err != nil {
+							return err
+						}
+						manager := environment.DockerManager{WorkDir: workDir}
+						_ = manager.Teardown(ctx, entry.Dir, *exercise.Spec.Environment.Docker)
+					case "kubernetes":
+						if exercise.Spec.Environment.Kubernetes == nil {
+							continue
+						}
+						k8s := exercise.Spec.Environment.Kubernetes
+						if environment.ShouldCreateKubernetesCluster(k8s) {
+							provider, state, err := resolveKubernetesProviderAndState(exercise.Metadata.Name, k8s)
+							if err != nil {
+								continue
+							}
+							_ = provider.Teardown(ctx, state)
+						}
+						_ = environment.DeleteExerciseState(exercise.Metadata.Name)
 					}
-					workDir, err := resolveWorkDir(exercise.Metadata.Name)
-					if err != nil {
-						return err
-					}
-					manager := environment.DockerManager{WorkDir: workDir}
-					_ = manager.Teardown(ctx, entry.Dir, *exercise.Spec.Environment.Docker)
 				}
 			} else {
 				current, err := loadCurrentExercise()
 				if err == nil {
 					if entry, found := scenario.FindByName(entries, current); found {
 						exercise := entry.Exercise
-						if exercise.Spec.Environment.Type == "docker" && exercise.Spec.Environment.Docker != nil {
-							workDir, err := resolveWorkDir(exercise.Metadata.Name)
-							if err != nil {
-								return err
+						switch exercise.Spec.Environment.Type {
+						case "docker":
+							if exercise.Spec.Environment.Docker != nil {
+								workDir, err := resolveWorkDir(exercise.Metadata.Name)
+								if err != nil {
+									return err
+								}
+								manager := environment.DockerManager{WorkDir: workDir}
+								_ = manager.Teardown(ctx, entry.Dir, *exercise.Spec.Environment.Docker)
 							}
-							manager := environment.DockerManager{WorkDir: workDir}
-							_ = manager.Teardown(ctx, entry.Dir, *exercise.Spec.Environment.Docker)
+						case "kubernetes":
+							if exercise.Spec.Environment.Kubernetes != nil {
+								k8s := exercise.Spec.Environment.Kubernetes
+								if environment.ShouldCreateKubernetesCluster(k8s) {
+									provider, state, err := resolveKubernetesProviderAndState(exercise.Metadata.Name, k8s)
+									if err == nil {
+										_ = provider.Teardown(ctx, state)
+									}
+								}
+								_ = environment.DeleteExerciseState(exercise.Metadata.Name)
+							}
 						}
 					}
 				}
@@ -68,6 +98,7 @@ func newCleanCmd() *cobra.Command {
 			gymDir, err := resolveGymDir()
 			if err == nil {
 				_ = os.RemoveAll(filepath.Join(gymDir, "workdir"))
+				_ = os.RemoveAll(filepath.Join(gymDir, "state"))
 			}
 
 			fmt.Fprintln(cmd.OutOrStdout(), "Cleanup complete.")

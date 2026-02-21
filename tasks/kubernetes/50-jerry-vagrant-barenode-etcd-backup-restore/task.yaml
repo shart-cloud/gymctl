@@ -1,0 +1,126 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-vagrant-barenode-etcd-backup-restore
+  title: "Jerry Needs Bare-Node etcd Backup + Restore Drill"
+  track: k8s-admin
+  week: 11
+  order: 3
+
+spec:
+  difficulty: advanced
+  estimatedTime: 60m
+  points: 260
+
+  description: |
+    This is a bare-node Vagrant exercise. You must bootstrap Kubernetes manually,
+    then perform an etcd backup and restore drill from the control-plane node.
+
+    Required outcomes:
+    - bootstrap a working kubeadm cluster
+    - create an etcd snapshot at /var/lib/etcd/backups/jerry-etcd.db
+    - perform a restore dry-run into /var/lib/etcd/restore-dryrun
+
+  learningOutcomes:
+    - "Bootstrap kubeadm cluster on bare nodes"
+    - "Create and validate etcd snapshots"
+    - "Practice restore workflow safely with a dry-run data directory"
+
+  tags:
+    - cka
+    - vagrant
+    - barenode
+    - etcd
+    - backup
+    - restore
+
+  prerequisites:
+    - jerry-vagrant-barenode-kubeadm-bootstrap
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      provider: vagrant
+      createCluster: true
+      namespace: default
+      vagrant:
+        bootstrapMode: barenode
+        box: bento/ubuntu-22.04
+        topology:
+          controlPlanes: 1
+          workers: 1
+        network:
+          privateCidr: 192.168.56.0/24
+        resources:
+          controlPlane:
+            cpus: 2
+            memoryMb: 4096
+          worker:
+            cpus: 2
+            memoryMb: 3072
+
+  checks:
+    - name: "Control-plane admin kubeconfig exists"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        test -f /etc/kubernetes/admin.conf
+      expectExitCode: 0
+
+    - name: "All nodes are Ready"
+      type: nodeExec
+      node: cp-1
+      timeout: 300s
+      script: |
+        set -e
+        export KUBECONFIG=/etc/kubernetes/admin.conf
+        kubectl wait --for=condition=Ready nodes --all --timeout=300s >/dev/null
+      expectExitCode: 0
+
+    - name: "etcd snapshot file exists"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        test -s /var/lib/etcd/backups/jerry-etcd.db
+      expectExitCode: 0
+
+    - name: "etcd snapshot metadata can be inspected"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        export KUBECONFIG=/etc/kubernetes/admin.conf
+        pod=$(kubectl -n kube-system get pod -l component=etcd -o jsonpath='{.items[0].metadata.name}')
+        kubectl -n kube-system exec "$pod" -- sh -lc '
+          if command -v etcdutl >/dev/null 2>&1; then
+            etcdutl snapshot status /var/lib/etcd/backups/jerry-etcd.db --write-out=table
+          else
+            ETCDCTL_API=3 etcdctl snapshot status /var/lib/etcd/backups/jerry-etcd.db --write-out=table
+          fi
+        ' | grep -Eq 'HASH|TOTAL'
+      expectExitCode: 0
+
+    - name: "Restore dry-run directory has member data"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        test -d /var/lib/etcd/restore-dryrun/member
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 35
+      file: hints/hint-2.md
+    - cost: 70
+      file: hints/hint-3.md
+
+  successMessage: |
+    Excellent. You completed a real bare-node etcd backup + restore drill.
+
+    **Key takeaway:** CKA-level safety comes from practicing backup and restore
+    paths before incidents happen, not during them.

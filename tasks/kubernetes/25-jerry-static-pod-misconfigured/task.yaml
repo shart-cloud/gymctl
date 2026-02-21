@@ -45,23 +45,21 @@ spec:
           condition: available
           timeout: 120s
     customSetup:
-      - type: script
-        timeout: 180s
-        script: |
-          set -e
-
-          node=$(kubectl get nodes -o name | sed 's#node/##' | grep -E 'control-plane|master' | head -n1)
-          if [ -z "$node" ]; then
-            node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-          fi
-
-          docker exec "$node" sh -c '
+      - type: nodeExec
+        timeout: 120s
+        nodeExec:
+          node: cp-1
+          script: |
             set -e
             manifest=/etc/kubernetes/manifests/kube-scheduler.yaml
             cp "$manifest" "${manifest}.bak"
             grep -q -- "--kubeconfig=/etc/kubernetes/scheduler.conf" "$manifest"
             sed -i "s#--kubeconfig=/etc/kubernetes/scheduler.conf#--kubeconfig=/etc/kubernetes/scheduler-broken.conf#g" "$manifest"
-          '
+
+      - type: script
+        timeout: 180s
+        script: |
+          set -e
 
           for i in $(seq 1 90); do
             ready=$(kubectl -n kube-system get pods -l component=kube-scheduler -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
@@ -83,15 +81,11 @@ spec:
       expectExitCode: 0
 
     - name: "Static pod manifest uses the correct scheduler kubeconfig"
-      type: script
+      type: nodeExec
+      node: cp-1
       script: |
         set -e
-        node=$(kubectl get nodes -o name | sed 's#node/##' | grep -E 'control-plane|master' | head -n1)
-        if [ -z "$node" ]; then
-          node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-        fi
-
-        line=$(docker exec "$node" sh -c "grep -E -- '--kubeconfig=' /etc/kubernetes/manifests/kube-scheduler.yaml | head -n1")
+        line=$(grep -E -- '--kubeconfig=' /etc/kubernetes/manifests/kube-scheduler.yaml | head -n1)
         echo "$line" | grep -q '/etc/kubernetes/scheduler.conf'
         ! echo "$line" | grep -q '/etc/kubernetes/scheduler-broken.conf'
       expectExitCode: 0

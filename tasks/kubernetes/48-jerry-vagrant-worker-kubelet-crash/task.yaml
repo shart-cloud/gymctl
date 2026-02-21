@@ -1,0 +1,115 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-vagrant-worker-kubelet-crash
+  title: "Jerry's Worker Kubelet Keeps Crashing (Managed Vagrant)"
+  track: k8s-troubleshooting
+  week: 11
+  order: 1
+
+spec:
+  difficulty: advanced
+  estimatedTime: 35m
+  points: 180
+
+  description: |
+    Jerry is running this exercise on Vagrant VMs because the failure is host-level.
+    One worker's kubelet was stopped during maintenance and now workloads cannot
+    schedule reliably.
+
+    Recover the worker node and verify the application can schedule again.
+
+  learningOutcomes:
+    - "Use node-level service diagnostics in a VM-based Kubernetes lab"
+    - "Recover kubelet and validate node readiness"
+    - "Confirm workload scheduling after node service recovery"
+
+  tags:
+    - cka
+    - vagrant
+    - kubelet
+    - nodes
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      provider: vagrant
+      createCluster: true
+      namespace: default
+      vagrant:
+        bootstrapMode: managed
+        box: bento/ubuntu-22.04
+        topology:
+          controlPlanes: 1
+          workers: 2
+        network:
+          privateCidr: 192.168.56.0/24
+        resources:
+          controlPlane:
+            cpus: 2
+            memoryMb: 4096
+          worker:
+            cpus: 2
+            memoryMb: 3072
+      setupManifests:
+        - setup/deployment.yaml
+      waitFor:
+        - resource: deployment/managed-vagrant-app
+          condition: Available
+          timeout: 240s
+    customSetup:
+      - type: nodeExec
+        timeout: 45s
+        nodeExec:
+          node: worker-1
+          script: |
+            set -e
+            systemctl stop kubelet
+
+  checks:
+    - name: "Worker kubelet service is active again"
+      type: nodeExec
+      node: worker-1
+      script: |
+        set -e
+        systemctl is-active kubelet | grep -q '^active$'
+      expectExitCode: 0
+
+    - name: "All nodes report Ready"
+      type: script
+      script: |
+        set -e
+        kubectl wait --for=condition=Ready nodes --all --timeout=240s >/dev/null
+      expectExitCode: 0
+
+    - name: "Deployment is Available"
+      type: condition
+      resource: deployment/managed-vagrant-app
+      condition: Available
+      status: "True"
+
+    - name: "Can schedule a probe pod"
+      type: script
+      script: |
+        set -e
+        kubectl delete pod vagrant-kubelet-probe --ignore-not-found >/dev/null 2>&1 || true
+        kubectl run vagrant-kubelet-probe --image=registry.k8s.io/pause:3.10 --restart=Never >/dev/null
+        kubectl wait --for=condition=Ready pod/vagrant-kubelet-probe --timeout=120s >/dev/null
+        kubectl delete pod vagrant-kubelet-probe --ignore-not-found >/dev/null 2>&1 || true
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Nice recovery. The worker kubelet is healthy and scheduling is restored.
+
+    **Key takeaway:** VM-based labs expose real host service operations (`systemctl`,
+    kubelet state, node recovery) that are essential for CKA-style admin practice.

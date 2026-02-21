@@ -50,16 +50,19 @@ func newStopCmd() *cobra.Command {
 					return fmt.Errorf("missing kubernetes environment config")
 				}
 				k8s := exercise.Spec.Environment.Kubernetes
-				createCluster := true
-				if k8s.CreateCluster != nil {
-					createCluster = *k8s.CreateCluster
+				createCluster := environment.ShouldCreateKubernetesCluster(k8s)
+				provider, state, err := resolveKubernetesProviderAndState(exercise.Metadata.Name, k8s)
+				if err != nil {
+					return err
 				}
 
 				if createCluster {
-					manager := environment.KindManager{ClusterName: "jerry-gym"}
-					fmt.Fprintln(cmd.OutOrStdout(), "Stopping kind cluster...")
-					if err := manager.Delete(ctx); err != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "Stopping %s cluster...\n", provider.Name())
+					if err := provider.Teardown(ctx, state); err != nil {
 						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to delete cluster: %v\n", err)
+					}
+					if err := environment.DeleteExerciseState(exercise.Metadata.Name); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to remove exercise state: %v\n", err)
 					}
 				}
 

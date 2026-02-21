@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: jerry-uploader
+  labels:
+    app: jerry-uploader
+spec:
+  containers:
+  - name: uploader
+    image: busybox:1.36
+    command: ["sh", "-c", "echo started > /uploads/init.log && sleep 3600"]
+    volumeMounts:
+    - name: upload-storage
+      mountPath: /uploads
+  volumes:
+  - name: upload-storage
+    emptyDir: {}

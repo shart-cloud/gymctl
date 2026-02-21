@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: jerry-api-0
+  labels:
+    app: jerry-api
+spec:
+  containers:
+  - name: app
+    image: registry.k8s.io/pause:3.10
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: jerry-api-1
+  labels:
+    app: jerry-api
+spec:
+  containers:
+  - name: app
+    image: registry.k8s.io/pause:3.10
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: jerry-api-2
+  labels:
+    app: jerry-api
+spec:
+  containers:
+  - name: app
+    image: registry.k8s.io/pause:3.10

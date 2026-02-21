@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"gymctl/internal/runner"
 )
@@ -46,10 +48,22 @@ func (w *WorkstationManager) EnsureRunning(ctx context.Context, gymctlBinaryPath
 }
 
 // ExecShell execs into the workstation container with a shell
-func (w *WorkstationManager) ExecShell(ctx context.Context, workDir string) error {
+func (w *WorkstationManager) ExecShell(ctx context.Context, workDir string, envVars map[string]string) error {
 	// Change to the work directory inside container
+	segments := make([]string, 0, len(envVars)+2)
+	keys := make([]string, 0, len(envVars))
+	for key := range envVars {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		segments = append(segments, fmt.Sprintf("export %s=%s", key, shellQuote(envVars[key])))
+	}
+	segments = append(segments, fmt.Sprintf("cd %s", shellQuote(workDir)))
+	segments = append(segments, "exec zsh")
+
 	cmd := []string{"docker", "exec", "-it", WorkstationContainerName, "sh", "-c",
-		fmt.Sprintf("cd %s && exec zsh", workDir)}
+		strings.Join(segments, " && ")}
 
 	return runner.RunInteractive(ctx, cmd[0], cmd[1:]...)
 }
@@ -142,4 +156,11 @@ func (w *WorkstationManager) startContainer(ctx context.Context, gymctlBinaryPat
 
 	// Install gymctl in the container
 	return w.InstallGymctl(ctx, gymctlBinaryPath)
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

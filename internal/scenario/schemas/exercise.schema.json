@@ -53,11 +53,112 @@
               "type": "string",
               "enum": ["docker", "kubernetes", "hybrid"]
             },
-            "kubernetes": {"type": "object"},
+            "kubernetes": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "enum": ["kind", "vagrant"]
+                },
+                "kindConfig": {"type": "string"},
+                "kind": {
+                  "type": "object",
+                  "properties": {
+                    "clusterName": {"type": "string"},
+                    "config": {"type": "string"}
+                  },
+                  "additionalProperties": true
+                },
+                "vagrant": {
+                  "type": "object",
+                  "properties": {
+                    "bootstrapMode": {
+                      "type": "string",
+                      "enum": ["managed", "barenode"]
+                    },
+                    "box": {"type": "string"},
+                    "kubernetesVersion": {"type": "string"},
+                    "podCIDR": {"type": "string"},
+                    "serviceCIDR": {"type": "string"},
+                    "cni": {"type": "string"},
+                    "sshUser": {"type": "string"},
+                    "bootstrap": {"type": "boolean"},
+                    "preinstall": {
+                      "type": "object",
+                      "properties": {
+                        "installContainerd": {"type": "boolean"},
+                        "installKubernetesPackages": {"type": "boolean"},
+                        "configureKernelNetworking": {"type": "boolean"}
+                      },
+                      "additionalProperties": true
+                    },
+                    "topology": {
+                      "type": "object",
+                      "properties": {
+                        "controlPlanes": {"type": "integer", "minimum": 0},
+                        "workers": {"type": "integer", "minimum": 0}
+                      },
+                      "additionalProperties": true
+                    },
+                    "network": {
+                      "type": "object",
+                      "properties": {
+                        "privateCidr": {"type": "string"}
+                      },
+                      "additionalProperties": true
+                    },
+                    "resources": {
+                      "type": "object",
+                      "properties": {
+                        "controlPlane": {
+                          "type": "object",
+                          "properties": {
+                            "cpus": {"type": "integer", "minimum": 0},
+                            "memoryMb": {"type": "integer", "minimum": 0}
+                          },
+                          "additionalProperties": true
+                        },
+                        "worker": {
+                          "type": "object",
+                          "properties": {
+                            "cpus": {"type": "integer", "minimum": 0},
+                            "memoryMb": {"type": "integer", "minimum": 0}
+                          },
+                          "additionalProperties": true
+                        }
+                      },
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
             "docker": {"type": "object"},
             "customSetup": {
               "type": "array",
-              "items": {"type": "object"}
+              "items": {
+                "type": "object",
+                "properties": {
+                  "type": {"type": "string"},
+                  "script": {"type": "string"},
+                  "condition": {"type": "string"},
+                  "timeout": {"type": "string"},
+                  "nodeExec": {
+                    "type": "object",
+                    "required": ["node"],
+                    "properties": {
+                      "node": {"type": "string"},
+                      "user": {"type": "string"},
+                      "script": {"type": "string"},
+                      "timeout": {"type": "string"}
+                    },
+                    "additionalProperties": true
+                  }
+                },
+                "additionalProperties": true
+              }
             }
           },
           "additionalProperties": true

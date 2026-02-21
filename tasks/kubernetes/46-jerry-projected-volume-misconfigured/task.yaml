@@ -1,0 +1,97 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-projected-volume-misconfigured
+  title: "Jerry's Projected Volume Won't Mount"
+  track: k8s-storage
+  week: 5
+  order: 12
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 140
+
+  description: |
+    Jerry wanted to expose both a ConfigMap and a Secret to his app from a
+    single mount path using a projected volume. The YAML looked right to him,
+    but the pod never starts — it gets stuck in ContainerCreating with a
+    volume-related error.
+
+    Fix the projected volume spec so the pod starts and both the ConfigMap
+    and Secret data are readable inside the container.
+
+  learningOutcomes:
+    - "Read and fix a projected volume source specification"
+    - "Understand the projected volume sources syntax for ConfigMap and Secret"
+    - "Verify combined volume mount from multiple sources"
+
+  tags:
+    - storage
+    - volumes
+    - projected
+    - configmap
+    - secret
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/configmap.yaml
+        - setup/secret.yaml
+        - setup/pod.yaml
+
+  checks:
+    - name: "Pod reaches Running"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 60); do
+          phase=$(kubectl get pod jerry-projected-app -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Running" ]; then exit 0; fi
+          sleep 2
+        done
+        echo "FAIL: pod phase=$(kubectl get pod jerry-projected-app -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+        kubectl describe pod jerry-projected-app | tail -20 || true
+        exit 1
+      expectExitCode: 0
+
+    - name: "ConfigMap data readable at /config/app.env"
+      type: script
+      script: |
+        set -e
+        val=$(kubectl exec jerry-projected-app -- cat /config/app.env 2>/dev/null || true)
+        if echo "$val" | grep -q "APP_ENV=production"; then exit 0; fi
+        echo "FAIL: /config/app.env contains: '$val'"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Secret data readable at /config/db-password"
+      type: script
+      script: |
+        set -e
+        val=$(kubectl exec jerry-projected-app -- cat /config/db-password 2>/dev/null || true)
+        if echo "$val" | grep -q "s3cr3t-p4ss"; then exit 0; fi
+        echo "FAIL: /config/db-password contains: '$val'"
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Projected volume working — both ConfigMap and Secret accessible from one path.
+
+    **Key takeaway:** projected volumes combine multiple sources under a single
+    mountPath. Each source uses configMap: or secret: (not configMapRef: or
+    secretRef:, which are for envFrom). The items: list controls which keys
+    become files and under what names.

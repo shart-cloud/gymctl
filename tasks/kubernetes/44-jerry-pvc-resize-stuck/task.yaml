@@ -1,0 +1,99 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-pvc-resize-stuck
+  title: "Jerry's PVC Resize Is Rejected"
+  track: k8s-storage
+  week: 5
+  order: 10
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 130
+
+  description: |
+    Jerry's app has outgrown its 1Gi storage. He edited the PVC to request 5Gi
+    but got an error: the StorageClass does not allow volume expansion.
+
+    The edit was rejected before it was even applied. The PVC is still 1Gi,
+    the app is running out of space, and nothing is expanding.
+
+    Enable volume expansion on the StorageClass, then complete the resize and
+    verify the new capacity is reflected on the PVC.
+
+  learningOutcomes:
+    - "Identify that PVC expansion requires allowVolumeExpansion on the StorageClass"
+    - "Enable volume expansion on an existing StorageClass"
+    - "Request a PVC resize and verify the new capacity"
+
+  tags:
+    - storage
+    - pvc
+    - resize
+    - storageclass
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/storageclass.yaml
+        - setup/pvc.yaml
+        - setup/pod.yaml
+      waitFor:
+        - resource: pod/jerry-app
+          condition: Ready
+          timeout: 120s
+
+  checks:
+    - name: "StorageClass has allowVolumeExpansion: true"
+      type: jsonpath
+      resource: storageclass/expandable-local
+      jsonpath: "{.allowVolumeExpansion}"
+      operator: equals
+      value: "true"
+
+    - name: "PVC requests at least 5Gi"
+      type: script
+      script: |
+        set -e
+        req=$(kubectl get pvc jerry-app-data -o jsonpath='{.spec.resources.requests.storage}' 2>/dev/null || true)
+        num=$(echo "$req" | tr -d 'GgiMmKk')
+        [ -n "$num" ] || { echo "FAIL: could not parse storage request '$req'"; exit 1; }
+        if [ "$num" -ge 5 ] 2>/dev/null; then exit 0; fi
+        echo "FAIL: PVC requests '$req', expected >= 5Gi"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Pod is still Running after resize"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 30); do
+          phase=$(kubectl get pod jerry-app -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Running" ]; then exit 0; fi
+          sleep 2
+        done
+        echo "FAIL: pod not Running"
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Volume expansion enabled and resize requested.
+
+    **Key takeaway:** PVC expansion is a two-step process. First the StorageClass
+    must have allowVolumeExpansion: true. Then the PVC request can be increased.
+    For filesystem resize to take effect inside a running container, the pod
+    typically needs to be restarted after the underlying volume resize completes.

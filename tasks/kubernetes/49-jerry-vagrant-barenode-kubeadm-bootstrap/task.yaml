@@ -1,0 +1,116 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-vagrant-barenode-kubeadm-bootstrap
+  title: "Jerry Needs a Bare-Node Kubeadm Bootstrap"
+  track: k8s-admin
+  week: 11
+  order: 2
+
+spec:
+  difficulty: advanced
+  estimatedTime: 45m
+  points: 220
+
+  description: |
+    This is a bare-node Vagrant lab. `gymctl` only provisions the Linux hosts.
+    Jerry forgot to initialize Kubernetes entirely.
+
+    Bootstrap a working cluster manually with kubeadm:
+    - initialize the control plane
+    - join the worker node
+    - install a CNI plugin
+
+  learningOutcomes:
+    - "Perform end-to-end kubeadm bootstrap on fresh nodes"
+    - "Use node-level access to validate cluster components"
+    - "Recover kubeconfig access in a realistic CKA-like flow"
+
+  tags:
+    - cka
+    - vagrant
+    - barenode
+    - kubeadm
+    - bootstrap
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      provider: vagrant
+      createCluster: true
+      namespace: default
+      vagrant:
+        bootstrapMode: barenode
+        box: bento/ubuntu-22.04
+        topology:
+          controlPlanes: 1
+          workers: 1
+        network:
+          privateCidr: 192.168.56.0/24
+        resources:
+          controlPlane:
+            cpus: 2
+            memoryMb: 4096
+          worker:
+            cpus: 2
+            memoryMb: 3072
+
+  checks:
+    - name: "Control-plane admin kubeconfig exists"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        test -f /etc/kubernetes/admin.conf
+      expectExitCode: 0
+
+    - name: "Worker kubelet joined the cluster"
+      type: nodeExec
+      node: worker-1
+      script: |
+        set -e
+        test -f /etc/kubernetes/kubelet.conf
+      expectExitCode: 0
+
+    - name: "Control-plane can list at least two nodes"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        export KUBECONFIG=/etc/kubernetes/admin.conf
+        count=$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        [ "$count" -ge 2 ]
+      expectExitCode: 0
+
+    - name: "CNI config exists on control-plane"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        ls /etc/cni/net.d/*.conf* >/dev/null 2>&1
+      expectExitCode: 0
+
+    - name: "All nodes are Ready from control-plane"
+      type: nodeExec
+      node: cp-1
+      timeout: 240s
+      script: |
+        set -e
+        export KUBECONFIG=/etc/kubernetes/admin.conf
+        kubectl wait --for=condition=Ready nodes --all --timeout=240s >/dev/null
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 35
+      file: hints/hint-2.md
+    - cost: 70
+      file: hints/hint-3.md
+
+  successMessage: |
+    Great work. You completed a full bare-node bootstrap on VM hosts.
+
+    **Key takeaway:** this is the closest path to real CKA admin flow: bring up
+    Linux nodes, run kubeadm yourself, and validate readiness from the control plane.

@@ -9,6 +9,7 @@ import (
 
 	"gymctl/internal/checks"
 	"gymctl/internal/dialogue"
+	"gymctl/internal/environment"
 	"gymctl/internal/progress"
 	"gymctl/internal/scenario"
 )
@@ -55,6 +56,9 @@ func newCheckCmd() *cobra.Command {
 			if ctx == nil {
 				ctx = context.Background()
 			}
+			if err := configureExerciseKubeconfigEnv(ctx, entry.Exercise); err != nil {
+				return err
+			}
 
 			workDir := ""
 			if entry.Exercise.Spec.Environment.Type == "docker" {
@@ -66,6 +70,9 @@ func newCheckCmd() *cobra.Command {
 			}
 			// Show checking header
 			ColorInfo.Fprintf(cmd.OutOrStdout(), "🔍 Checking: %s\n", entry.Exercise.Metadata.Name)
+			if entry.Exercise.Spec.Environment.Kubernetes != nil && environment.IsBareNodeKubernetes(entry.Exercise.Spec.Environment.Kubernetes) {
+				ColorDim.Fprintln(cmd.OutOrStdout(), "  bare-node mode: nodeExec checks can run before kubeadm bootstrap completes")
+			}
 			fmt.Fprintln(cmd.OutOrStdout())
 
 			results, allPassed := checks.RunExerciseChecks(ctx, entry.Exercise, workDir)

@@ -1,0 +1,166 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-scheduler-missing
+  title: "Jerry Deleted the kube-scheduler Manifest"
+  track: k8s-admin
+  week: 8
+  order: 37
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 175
+
+  description: |
+    Jerry deleted `/etc/kubernetes/manifests/kube-scheduler.yaml` while "cleaning up"
+    the control-plane node. There is no kube-scheduler pod in kube-system, and all
+    new pods are stuck Pending.
+
+    The API server accepts objects normally — scheduling is the only broken component.
+    Restore the kube-scheduler so new pods can be assigned to nodes.
+
+  learningOutcomes:
+    - "Diagnose a missing control-plane component from pod and event state"
+    - "Distinguish a missing static pod manifest from a broken one"
+    - "Restore kube-scheduler using kubeadm init phase control-plane scheduler"
+    - "Understand that kubeadm can regenerate any control-plane manifest"
+
+  tags:
+    - troubleshooting
+    - control-plane
+    - kube-scheduler
+    - static-pods
+    - kubeadm
+    - cka
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+      waitFor:
+        - resource: deployment/jerry-scheduler-probe
+          condition: available
+          timeout: 120s
+    customSetup:
+      - type: nodeExec
+        timeout: 120s
+        nodeExec:
+          node: cp-1
+          script: |
+            set -e
+            manifest=/etc/kubernetes/manifests/kube-scheduler.yaml
+            [ -f "$manifest" ] || { echo "scheduler manifest already missing"; exit 1; }
+            mv "$manifest" /tmp/kube-scheduler.yaml.bak
+
+      - type: script
+        timeout: 180s
+        script: |
+          set -e
+
+          for i in $(seq 1 90); do
+            count=$(kubectl -n kube-system get pods -l component=kube-scheduler --no-headers 2>/dev/null | wc -l | tr -d ' ' || true)
+            if [ "$count" -eq 0 ]; then
+              break
+            fi
+            sleep 1
+          done
+
+          kubectl rollout restart deployment/jerry-scheduler-probe -n default >/dev/null
+          echo "setup complete: scheduler manifest removed, probe deployment restarted"
+
+  checks:
+    - name: "kube-scheduler pod exists in kube-system"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 90); do
+          count=$(kubectl -n kube-system get pods -l component=kube-scheduler --no-headers 2>/dev/null | wc -l | tr -d ' ' || true)
+          if [ "$count" -ge 1 ]; then
+            exit 0
+          fi
+          sleep 1
+        done
+        echo "kube-scheduler pod not found after 90s"
+        exit 1
+      expectExitCode: 0
+
+    - name: "kube-scheduler pod is Ready"
+      type: script
+      script: |
+        set -e
+        kubectl -n kube-system wait --for=condition=Ready pod -l component=kube-scheduler --timeout=120s >/dev/null
+      expectExitCode: 0
+
+    - name: "kube-scheduler manifest exists on control-plane node"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        test -f /etc/kubernetes/manifests/kube-scheduler.yaml
+      expectExitCode: 0
+
+    - name: "New pod can be scheduled"
+      type: script
+      script: |
+        set -e
+        kubectl delete pod scheduler-restore-check --ignore-not-found >/dev/null 2>&1 || true
+        kubectl run scheduler-restore-check --image=registry.k8s.io/pause:3.10 --restart=Never >/dev/null
+
+        for i in $(seq 1 60); do
+          nodeName=$(kubectl get pod scheduler-restore-check -o jsonpath='{.spec.nodeName}' 2>/dev/null || true)
+          phase=$(kubectl get pod scheduler-restore-check -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ -n "$nodeName" ] && [ "$phase" != "Pending" ]; then
+            kubectl delete pod scheduler-restore-check --ignore-not-found >/dev/null 2>&1 || true
+            exit 0
+          fi
+          sleep 1
+        done
+
+        kubectl get pod scheduler-restore-check -o wide || true
+        kubectl delete pod scheduler-restore-check --ignore-not-found >/dev/null 2>&1 || true
+        exit 1
+      expectExitCode: 0
+
+    - name: "jerry-scheduler-probe deployment is Available"
+      type: condition
+      resource: deployment/jerry-scheduler-probe
+      condition: Available
+      status: "True"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    kube-scheduler restored and the cluster is scheduling pods again.
+
+    **Key takeaway:** `kubeadm init phase control-plane scheduler` regenerates the
+    kube-scheduler static pod manifest from scratch — no backup copy needed.
+    This works for any control-plane component: apiserver, controller-manager,
+    or scheduler. When a static pod manifest is gone, the pod simply disappears;
+    there is no CrashLoop, no error — just silence.
+
+  tasking:
+    ticket: "OPS-4812"
+    priority: "P0"
+    summary: "All new pods stuck Pending — no scheduler visible in kube-system"
+    description: |
+      Following Jerry's control-plane cleanup at 14:30, no new pods are being
+      scheduled. API server and etcd appear healthy. kube-scheduler is not present
+      in kube-system. On-call response required immediately.
+    reporter: "PAGER-1"
+
+  jerryDialog:
+    onStart: "i was cleaning up yaml files under /etc/kubernetes/manifests and there were so many"
+    onCheckFail: "the api server is up though, so the cluster is fine right"
+    onHintUsed: "wait, where do static pod manifests even come from originally"
+    onComplete: "kubeadm can regenerate them. i did not know that. i will not delete those again."

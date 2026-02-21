@@ -1,0 +1,107 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-ephemeral-volume-confusion
+  title: "Jerry's emptyDir Isn't Persistent"
+  track: k8s-storage
+  week: 5
+  order: 8
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 130
+
+  description: |
+    Jerry's app "has a volume" — it's right there in kubectl describe. But
+    every time the pod restarts, all uploaded files are gone.
+
+    Jerry is convinced storage is configured correctly. The volume is mounted.
+    The app writes files. They're visible while the pod is running. Then the
+    pod restarts and they vanish.
+
+    Identify why data is lost and replace the ephemeral volume with a
+    PersistentVolumeClaim. Prove data survives a pod delete and recreate.
+
+  learningOutcomes:
+    - "Identify emptyDir as node-local ephemeral storage"
+    - "Understand that emptyDir data is destroyed when a pod is removed"
+    - "Replace emptyDir with a PVC and verify persistence across pod restarts"
+
+  tags:
+    - storage
+    - emptydir
+    - pvc
+    - ephemeral
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/storageclass.yaml
+        - setup/pod.yaml
+      waitFor:
+        - resource: pod/jerry-uploader
+          condition: Ready
+          timeout: 60s
+
+  checks:
+    - name: "Pod is Running"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 60); do
+          phase=$(kubectl get pod jerry-uploader -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Running" ]; then exit 0; fi
+          sleep 2
+        done
+        echo "FAIL: pod not Running"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Pod uses a PVC (not emptyDir)"
+      type: script
+      script: |
+        set -e
+        vol_type=$(kubectl get pod jerry-uploader -o jsonpath='{.spec.volumes[0]}' 2>/dev/null || true)
+        if echo "$vol_type" | grep -q "persistentVolumeClaim"; then exit 0; fi
+        echo "FAIL: volume is not a PVC — still using emptyDir or another ephemeral type"
+        echo "Current volume spec: $vol_type"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Data survives pod delete and recreate"
+      type: script
+      script: |
+        set -e
+        kubectl exec jerry-uploader -- sh -c 'echo persistent-proof > /uploads/sentinel'
+        kubectl delete pod jerry-uploader
+        for i in $(seq 1 90); do
+          phase=$(kubectl get pod jerry-uploader -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Running" ]; then break; fi
+          sleep 3
+        done
+        phase=$(kubectl get pod jerry-uploader -o jsonpath='{.status.phase}' 2>/dev/null || true)
+        [ "$phase" = "Running" ] || { echo "FAIL: pod did not come back — recreate it after the delete"; exit 1; }
+        kubectl exec jerry-uploader -- grep -q persistent-proof /uploads/sentinel
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Switched to persistent storage and data survives restarts.
+
+    **Key takeaway:** emptyDir volumes look like real storage but are tied to
+    the pod's lifetime. They're useful for caches and scratch space — never
+    for data you care about keeping. Check volume type in kubectl describe,
+    not just whether a mountPath exists.

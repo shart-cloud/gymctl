@@ -16,6 +16,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"gymctl/internal/environment"
 	"gymctl/internal/runner"
 	"gymctl/internal/scenario"
 )
@@ -80,6 +81,8 @@ func runCheck(ctx context.Context, exercise *scenario.Exercise, workDir string, 
 			return runPodLogsCheck(ctx, namespace, check)
 		case "exec":
 			return runKubernetesExecCheck(ctx, namespace, check)
+		case "nodeExec":
+			return runNodeExecCheck(ctx, exercise, check)
 		default:
 			result.Message = fmt.Sprintf("unsupported check type: %s", check.Type)
 			return result
@@ -920,6 +923,66 @@ func checkExpectOutput(output string, expect *scenario.ExpectOutput, result Resu
 			return result
 		}
 	}
+	result.Passed = true
+	return result
+}
+
+func runNodeExecCheck(ctx context.Context, exercise *scenario.Exercise, check scenario.Check) Result {
+	result := Result{Name: check.Name}
+	if exercise == nil || exercise.Spec.Environment.Kubernetes == nil {
+		result.Message = "nodeExec requires kubernetes environment"
+		return result
+	}
+	if strings.TrimSpace(check.Node) == "" {
+		result.Message = "missing node"
+		return result
+	}
+	if strings.TrimSpace(check.Script) == "" {
+		result.Message = "missing script"
+		return result
+	}
+
+	provider, err := environment.ResolveKubernetesProvider(exercise.Spec.Environment.Kubernetes)
+	if err != nil {
+		result.Message = err.Error()
+		return result
+	}
+
+	state, err := environment.LoadExerciseState(exercise.Metadata.Name)
+	if err != nil {
+		result.Message = err.Error()
+		return result
+	}
+	if state == nil {
+		state = &environment.ExerciseState{ExerciseName: exercise.Metadata.Name}
+	}
+
+	output, err := provider.NodeExec(ctx, state, check.Node, check.Script, check.Timeout)
+
+	if check.ExpectExitCode != nil {
+		exitCode := 0
+		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				exitCode = exitErr.ExitCode()
+			} else {
+				result.Message = err.Error()
+				return result
+			}
+		}
+		if exitCode != *check.ExpectExitCode {
+			result.Message = fmt.Sprintf("expected exit code %d, got %d", *check.ExpectExitCode, exitCode)
+			return result
+		}
+	} else if err != nil {
+		result.Message = err.Error()
+		return result
+	}
+
+	if check.ExpectOutput != nil {
+		return checkExpectOutput(output, check.ExpectOutput, result)
+	}
+
 	result.Passed = true
 	return result
 }

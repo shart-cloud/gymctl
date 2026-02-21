@@ -43,27 +43,27 @@ spec:
           condition: available
           timeout: 120s
     customSetup:
+      - type: nodeExec
+        timeout: 60s
+        nodeExec:
+          node: cp-1
+          script: |
+            set -e
+            systemctl stop kubelet
       - type: script
         timeout: 180s
         script: |
           set -e
-          node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-
-          docker exec "$node" systemctl stop kubelet
           kubectl rollout restart deployment/jerry-node-app -n default
 
           for i in $(seq 1 120); do
-            if ! ready=$(kubectl get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null); then
-              sleep 1
-              continue
-            fi
-            if [ "$ready" = "False" ] || [ "$ready" = "Unknown" ]; then
+            if kubectl get nodes -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -Eq '^(False|Unknown)$'; then
               exit 0
             fi
             sleep 1
           done
 
-          echo "node did not transition away from Ready after kubelet stop"
+          echo "no node transitioned away from Ready after kubelet stop"
           exit 1
 
   checks:
@@ -76,12 +76,12 @@ spec:
         [ "$ready" = "True" ]
       expectExitCode: 0
 
-    - name: "kubelet service is active on node"
-      type: script
+    - name: "kubelet service is active on control-plane node"
+      type: nodeExec
+      node: cp-1
       script: |
         set -e
-        node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-        state=$(docker exec "$node" systemctl is-active kubelet 2>/dev/null || true)
+        state=$(systemctl is-active kubelet 2>/dev/null || true)
         [ "$state" = "active" ]
       expectExitCode: 0
 

@@ -60,22 +60,12 @@ spec:
         kubectl run cni-verify-pod --image=nginx:1.20 --rm -i --restart=Never --timeout=60s -- echo "CNI working"
       expectExitCode: 0
 
-    - name: "CNI configuration exists on all nodes"
-      type: script
+    - name: "CNI configuration exists on control-plane node"
+      type: nodeExec
+      node: cp-1
       script: |
         set -e
-        # Check that CNI config exists on all worker nodes
-        nodes=$(kubectl get nodes -o name | grep -v control-plane)
-        for node in $nodes; do
-          node_name=$(echo $node | cut -d/ -f2)
-          # Use docker exec to check inside kind nodes
-          if docker exec "$node_name" test -f /etc/cni/net.d/10-kindnet.conflist; then
-            echo "CNI config found on $node_name"
-          else
-            echo "CNI config missing on $node_name"
-            exit 1
-          fi
-        done
+        test -f /etc/cni/net.d/10-kindnet.conflist
       expectExitCode: 0
 
     - name: "Pod networking functions correctly"

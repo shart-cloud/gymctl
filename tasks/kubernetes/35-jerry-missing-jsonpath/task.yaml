@@ -1,0 +1,123 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-missing-jsonpath
+  title: "Jerry's jsonpath Script Returns Empty Everything"
+  track: k8s-admin
+  week: 7
+  order: 35
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 100
+
+  description: |
+    Jerry wrote a script to extract fields from Kubernetes objects using `-o jsonpath`,
+    but all four expressions are broken and return empty output.
+
+    Fix the jsonpath expressions in `/tmp/jerry-jsonpath-broken.sh` so each query
+    returns the correct data. Do not change the variable names or overall structure.
+
+  learningOutcomes:
+    - "Write correct kubectl jsonpath list expressions using [*]"
+    - "Navigate nested pod spec fields with jsonpath"
+    - "Use --sort-by to order kubectl output by a field"
+    - "Understand that jsonpath field names are case-sensitive"
+
+  tags:
+    - kubectl
+    - jsonpath
+    - output-formatting
+    - k8s-admin
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/pods.yaml
+      waitFor:
+        - resource: pod
+          selector: app=jerry-api
+          condition: ready
+          timeout: 60s
+    customSetup:
+      - type: script
+        timeout: 30s
+        script: |
+          set -e
+          cat > /tmp/jerry-jsonpath-broken.sh << 'ENDSCRIPT'
+          #!/bin/bash
+          # Jerry's jsonpath queries — fix the expressions below.
+          # Do NOT change variable names or the general structure.
+
+          # QUERY 1: Get all pod names with label app=jerry-api (space-separated)
+          QUERY1=$(kubectl get pods -l app=jerry-api -o jsonpath='{.items.metadata.name}')
+
+          # QUERY 2: Get the node name that pod jerry-api-0 is scheduled on
+          QUERY2=$(kubectl get pod jerry-api-0 -o jsonpath='{.spec.nodename}')
+
+          # QUERY 3: Get all container image names across jerry-api pods (space-separated)
+          QUERY3=$(kubectl get pods -l app=jerry-api -o jsonpath='{.items.containers.image}')
+
+          # QUERY 4: Get pod names sorted by creation timestamp (oldest first)
+          QUERY4=$(kubectl get pods -l app=jerry-api -o jsonpath='{.items[*].metadata.name}')
+          ENDSCRIPT
+          chmod +x /tmp/jerry-jsonpath-broken.sh
+
+  checks:
+    - name: "QUERY1 returns all three pod names"
+      type: script
+      script: check/check-query1.sh
+      expectExitCode: 0
+
+    - name: "QUERY2 returns a valid node name"
+      type: script
+      script: check/check-query2.sh
+      expectExitCode: 0
+
+    - name: "QUERY3 returns at least three container images"
+      type: script
+      script: check/check-query3.sh
+      expectExitCode: 0
+
+    - name: "QUERY4 uses --sort-by and returns output"
+      type: script
+      script: check/check-query4.sh
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    All four jsonpath queries fixed.
+
+    **Key takeaway:** `{.items.metadata.name}` does not traverse a list — you need
+    `{.items[*].metadata.name}`. Field names are case-sensitive: `.spec.nodeName`
+    not `.spec.nodename`. For nested fields use the full path:
+    `.items[*].spec.containers[*].image`. Add `--sort-by=.metadata.creationTimestamp`
+    to order results by age.
+
+  tasking:
+    ticket: "TOOLS-0891"
+    priority: "P3"
+    summary: "kubectl extraction script produces empty output for all queries"
+    description: |
+      Jerry wrote a jsonpath script to pull pod info for our weekly capacity report.
+      All four queries return empty strings. The script is at /tmp/jerry-jsonpath-broken.sh.
+      Fix it so the report pipeline can run tonight.
+    reporter: "OPS-TEAM"
+
+  jerryDialog:
+    onStart: "jsonpath is basically jq right, how hard can it be"
+    onCheckFail: "the dot notation should work, i saw it in a blog post"
+    onHintUsed: "wait there's a difference between the root object and a list?"
+    onComplete: "`.items[*]` not `.items.` — i will never forget that again"

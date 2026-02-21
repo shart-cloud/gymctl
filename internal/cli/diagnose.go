@@ -16,11 +16,11 @@ import (
 )
 
 type diagnosticCheck struct {
-	Name        string
-	Category    string
-	Check       func(ctx context.Context) (bool, string, string)
-	Required    bool
-	FixCommand  string
+	Name       string
+	Category   string
+	Check      func(ctx context.Context) (bool, string, string)
+	Required   bool
+	FixCommand string
 }
 
 func newDiagnoseCmd() *cobra.Command {
@@ -233,6 +233,20 @@ func getSystemChecks() []diagnosticCheck {
 				output, err := cmd.Output()
 				if err != nil {
 					return false, "kind is not installed", "Install from https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
+				}
+				version := strings.TrimSpace(string(output))
+				return true, version, ""
+			},
+		},
+		{
+			Name:     "vagrant installed",
+			Category: "Kubernetes",
+			Required: false,
+			Check: func(ctx context.Context) (bool, string, string) {
+				cmd := exec.CommandContext(ctx, "vagrant", "--version")
+				output, err := cmd.Output()
+				if err != nil {
+					return false, "vagrant is not installed", "Install from https://developer.hashicorp.com/vagrant/downloads"
 				}
 				version := strings.TrimSpace(string(output))
 				return true, version, ""

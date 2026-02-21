@@ -1,0 +1,85 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-storageclass-default-conflict
+  title: "Jerry's Cluster Has Two Default StorageClasses"
+  track: k8s-storage
+  week: 5
+  order: 9
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 130
+
+  description: |
+    Jerry installed a new StorageClass and marked it as the cluster default.
+    But he forgot the cluster already had a default. Now there are two
+    StorageClasses both annotated as default.
+
+    PVCs without an explicit storageClassName are behaving unpredictably —
+    the API server rejects them or sends them to whichever class it picks first.
+
+    Fix the cluster so exactly one StorageClass is the default, then verify
+    that an unqualified PVC binds cleanly.
+
+  learningOutcomes:
+    - "Identify the double-default StorageClass condition"
+    - "Remove the default annotation from the correct StorageClass"
+    - "Verify PVC binding behavior with a single default class"
+
+  tags:
+    - storage
+    - storageclass
+    - default
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/storageclass-standard.yaml
+        - setup/storageclass-fast.yaml
+        - setup/pvc.yaml
+
+  checks:
+    - name: "Exactly one StorageClass is annotated as default"
+      type: script
+      script: |
+        set -e
+        count=$(kubectl get storageclass -o jsonpath='{range .items[*]}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}' | grep -c "^true$" || true)
+        if [ "$count" = "1" ]; then exit 0; fi
+        echo "FAIL: $count StorageClasses marked as default (expected 1)"
+        exit 1
+      expectExitCode: 0
+
+    - name: "jerry-unqualified-pvc is Bound"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 60); do
+          phase=$(kubectl get pvc jerry-unqualified-pvc -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Bound" ]; then exit 0; fi
+          sleep 2
+        done
+        echo "FAIL: PVC phase=$(kubectl get pvc jerry-unqualified-pvc -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Single default StorageClass restored and PVC binding is predictable.
+
+    **Key takeaway:** when multiple StorageClasses carry the default annotation,
+    PVC behavior is undefined. Keep exactly one default — or none, and always
+    specify storageClassName explicitly in production workloads.

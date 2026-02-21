@@ -1,0 +1,102 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-volume-mount-wrong-path
+  title: "Jerry's Volume Mount Goes Nowhere"
+  track: k8s-storage
+  week: 5
+  order: 4
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 130
+
+  description: |
+    Jerry deployed a StatefulSet with a PVC, but the volume mount path in the
+    container spec doesn't match where the application writes its data. The PVC
+    is Bound and the pod is Running — storage looks fine. But every restart
+    loses all data because writes land on ephemeral container storage, not the
+    persistent volume.
+
+    Fix the mount path so writes land on the PVC, then prove data survives a
+    pod restart.
+
+  learningOutcomes:
+    - "Distinguish between PVC Bound status and volume actually being used"
+    - "Identify mountPath mismatches in StatefulSet specs"
+    - "Verify persistence by surviving a pod delete and recreate"
+
+  tags:
+    - storage
+    - pvc
+    - statefulset
+    - mountpath
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/storageclass.yaml
+        - setup/statefulset.yaml
+      waitFor:
+        - resource: statefulset/jerry-db
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "StatefulSet pod is Running"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 60); do
+          phase=$(kubectl get pod jerry-db-0 -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Running" ]; then exit 0; fi
+          sleep 2
+        done
+        echo "FAIL: pod not Running"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Volume is mounted at /data (not /cache)"
+      type: script
+      script: |
+        set -e
+        mount=$(kubectl get pod jerry-db-0 -o jsonpath='{.spec.containers[0].volumeMounts[0].mountPath}' 2>/dev/null || true)
+        if [ "$mount" = "/data" ]; then exit 0; fi
+        echo "FAIL: mountPath is '$mount', expected '/data'"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Data survives pod restart"
+      type: script
+      script: |
+        set -e
+        kubectl exec jerry-db-0 -- sh -c 'echo persist-check > /data/probe'
+        kubectl delete pod jerry-db-0
+        for i in $(seq 1 60); do
+          phase=$(kubectl get pod jerry-db-0 -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Running" ]; then break; fi
+          sleep 3
+        done
+        kubectl exec jerry-db-0 -- sh -c 'grep -q persist-check /data/probe'
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Mount path corrected and persistence verified.
+
+    **Key takeaway:** a Bound PVC means storage is reserved, not that it is
+    in use. Always confirm mountPath matches where the application reads and
+    writes — and prove it with a restart test.

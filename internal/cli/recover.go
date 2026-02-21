@@ -195,9 +195,13 @@ func recoverExercise(cmd *cobra.Command, exerciseName, backupPath string, force 
 	case "kubernetes":
 		if exercise.Spec.Environment.Kubernetes != nil {
 			k8s := exercise.Spec.Environment.Kubernetes
-			if k8s.CreateCluster != nil && *k8s.CreateCluster {
-				manager := environment.KindManager{ClusterName: "jerry-gym"}
-				_ = manager.Delete(ctx)
+			if environment.ShouldCreateKubernetesCluster(k8s) {
+				provider, state, err := resolveKubernetesProviderAndState(exerciseName, k8s)
+				if err != nil {
+					return err
+				}
+				_ = provider.Teardown(ctx, state)
+				_ = environment.DeleteExerciseState(exerciseName)
 			}
 		}
 	}
@@ -232,7 +236,7 @@ func recoverExercise(cmd *cobra.Command, exerciseName, backupPath string, force 
 
 	fmt.Fprintln(cmd.OutOrStdout())
 	ColorSuccess.Fprintf(cmd.OutOrStdout(), "✅ Exercise %s recovered\n", exerciseName)
-	ColorInfo.Fprintln(cmd.OutOrStdout(), "You can now start fresh with: gymctl start " + exerciseName)
+	ColorInfo.Fprintln(cmd.OutOrStdout(), "You can now start fresh with: gymctl start "+exerciseName)
 
 	return nil
 }

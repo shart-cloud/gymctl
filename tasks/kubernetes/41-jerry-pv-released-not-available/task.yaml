@@ -1,0 +1,172 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-pv-released-not-available
+  title: "Jerry's Released PV Won't Rebind"
+  track: k8s-storage
+  week: 5
+  order: 7
+
+spec:
+  difficulty: advanced
+  estimatedTime: 30m
+  points: 150
+
+  description: |
+    Jerry deleted his PVC to free up a storage claim, intending to create a
+    new one and rebind to the same underlying volume. The PV still exists —
+    but it's stuck in Released phase and the new PVC won't bind to it.
+
+    A Released PV still has its old claimRef pointing to the deleted claim.
+    The provisioner won't rebind it until that reference is cleared.
+
+    Recover the Released PV and bind the waiting claim to it.
+
+  learningOutcomes:
+    - "Understand the PV lifecycle phases: Available, Bound, Released, Failed"
+    - "Clear a stale claimRef to make a Released PV Available again"
+    - "Verify rebinding after manual PV recovery"
+
+  tags:
+    - storage
+    - persistentvolumes
+    - reclaim-policy
+    - troubleshooting
+    - cka
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/storageclass.yaml
+    customSetup:
+      - type: script
+        timeout: 180s
+        script: |
+          set -e
+
+          kubectl apply -f - <<'MANIFEST'
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: jerry-original-claim
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 2Gi
+            storageClassName: retained-local
+          MANIFEST
+
+          kubectl apply -f - <<'MANIFEST'
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: jerry-setup-pod
+          spec:
+            containers:
+            - name: writer
+              image: busybox:1.36
+              command: ["sh", "-c", "echo retained-data > /data/payload && sleep 10"]
+              volumeMounts:
+              - name: data
+                mountPath: /data
+            volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: jerry-original-claim
+            restartPolicy: Never
+          MANIFEST
+
+          for i in $(seq 1 90); do
+            phase=$(kubectl get pvc jerry-original-claim -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            if [ "$phase" = "Bound" ]; then break; fi
+            sleep 2
+          done
+
+          for i in $(seq 1 60); do
+            phase=$(kubectl get pod jerry-setup-pod -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            if [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ]; then break; fi
+            sleep 2
+          done
+
+          PV_NAME=$(kubectl get pvc jerry-original-claim -o jsonpath='{.spec.volumeName}')
+
+          kubectl delete pod jerry-setup-pod --ignore-not-found
+          kubectl delete pvc jerry-original-claim
+
+          for i in $(seq 1 60); do
+            phase=$(kubectl get pv "$PV_NAME" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            if [ "$phase" = "Released" ]; then break; fi
+            sleep 2
+          done
+
+          kubectl label pv "$PV_NAME" jerry.gym/state=released --overwrite
+
+          kubectl apply -f - <<'MANIFEST'
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: jerry-new-claim
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 2Gi
+            storageClassName: retained-local
+          MANIFEST
+
+  checks:
+    - name: "Released PV is now Available or Bound"
+      type: script
+      script: |
+        set -e
+        pv=$(kubectl get pv -l jerry.gym/state=released -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        [ -n "$pv" ] || { echo "FAIL: labeled PV not found"; exit 1; }
+        phase=$(kubectl get pv "$pv" -o jsonpath='{.status.phase}')
+        if [ "$phase" = "Available" ] || [ "$phase" = "Bound" ]; then exit 0; fi
+        echo "FAIL: PV phase is '$phase'"
+        exit 1
+      expectExitCode: 0
+
+    - name: "jerry-new-claim is Bound"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 60); do
+          phase=$(kubectl get pvc jerry-new-claim -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Bound" ]; then exit 0; fi
+          sleep 2
+        done
+        echo "FAIL: jerry-new-claim phase=$(kubectl get pvc jerry-new-claim -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+        exit 1
+      expectExitCode: 0
+
+    - name: "New claim bound to the recovered PV"
+      type: script
+      script: |
+        set -e
+        pv=$(kubectl get pv -l jerry.gym/state=released -o jsonpath='{.items[0].metadata.name}')
+        bound_pv=$(kubectl get pvc jerry-new-claim -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
+        if [ "$bound_pv" = "$pv" ]; then exit 0; fi
+        echo "FAIL: claim bound to '$bound_pv', expected '$pv'"
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    PV recovered and rebound.
+
+    **Key takeaway:** a Released PV retains its claimRef from the previous
+    binding. Clear the claimRef by patching it to null — the controller will
+    then set the phase back to Available and allow new claims to bind.

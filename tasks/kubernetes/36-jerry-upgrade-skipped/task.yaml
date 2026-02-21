@@ -1,0 +1,121 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-upgrade-skipped
+  title: "Jerry Tried to Skip a Minor Version in the Upgrade Script"
+  track: k8s-admin
+  week: 7
+  order: 36
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 150
+
+  description: |
+    Jerry wrote a cluster upgrade script that jumps straight from v1.29 to v1.31,
+    skipping v1.30. kubeadm enforces one minor version per upgrade step — this would fail.
+    The script also has several other procedural gaps.
+
+    Fix `/tmp/jerry-upgrade.sh` so it reflects the correct kubeadm upgrade procedure:
+    one minor version at a time, in the right order, with all required steps present.
+
+  learningOutcomes:
+    - "Understand kubeadm's one-minor-version-at-a-time upgrade policy"
+    - "Know the correct upgrade order: unhold, plan, apply, then kubelet/kubectl"
+    - "Include kubectl drain before upgrading worker node packages"
+    - "Use kubeadm upgrade node on each worker after upgrading the binary"
+
+  tags:
+    - kubeadm
+    - upgrades
+    - version-skew
+    - cluster-admin
+    - cka
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+    customSetup:
+      - type: script
+        timeout: 30s
+        script: |
+          set -e
+          cat > /tmp/jerry-upgrade.sh << 'ENDSCRIPT'
+          #!/bin/bash
+          # Cluster upgrade script: v1.29 -> v1.31
+          # Jerry: this is just two versions, should be fine
+
+          # === Control plane ===
+          apt-get install -y kubeadm=1.31.0-1.1
+          kubeadm upgrade apply v1.31.0
+          apt-get install -y kubelet=1.31.0-1.1 kubectl=1.31.0-1.1
+          systemctl daemon-reload && systemctl restart kubelet
+
+          # === Worker nodes ===
+          apt-get install -y kubelet=1.31.0-1.1 kubectl=1.31.0-1.1
+          systemctl daemon-reload && systemctl restart kubelet
+          ENDSCRIPT
+          chmod +x /tmp/jerry-upgrade.sh
+
+  checks:
+    - name: "Script includes v1.30 as an intermediate upgrade step"
+      type: script
+      script: check/check-intermediate-version.sh
+      expectExitCode: 0
+
+    - name: "Script runs kubeadm upgrade plan before apply"
+      type: script
+      script: check/check-upgrade-plan.sh
+      expectExitCode: 0
+
+    - name: "Script includes apt-mark unhold before apt-get install"
+      type: script
+      script: check/check-unhold.sh
+      expectExitCode: 0
+
+    - name: "Script includes kubeadm upgrade node for worker nodes"
+      type: script
+      script: check/check-worker-upgrade.sh
+      expectExitCode: 0
+
+    - name: "Script includes kubectl drain before worker package upgrades"
+      type: script
+      script: check/check-drain.sh
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Upgrade script is now correct.
+
+    **Key takeaway:** kubeadm enforces one minor version at a time — v1.29 → v1.30
+    → v1.31, never a two-step jump. Always: `apt-mark unhold` before installing,
+    `kubeadm upgrade plan` before `apply`, `kubectl drain` before touching worker
+    packages, and `kubeadm upgrade node` on each worker to sync kubelet config.
+
+  tasking:
+    ticket: "OPS-1190"
+    priority: "P1"
+    summary: "Cluster upgrade script has version skew violation — will fail at apply"
+    description: |
+      Jerry's upgrade script for the prod cluster jumps straight from v1.29 to v1.31.
+      kubeadm will reject this. The script also has several other procedural gaps
+      that would leave the cluster in a broken state mid-upgrade.
+      Fix /tmp/jerry-upgrade.sh before the maintenance window tonight.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "1.29 to 1.31 is just two versions, that's basically nothing"
+    onCheckFail: "it's a minor version, it's in the name, it's minor"
+    onHintUsed: "there's a specific order to upgrading each component?"
+    onComplete: "one minor version at a time forever, got it"

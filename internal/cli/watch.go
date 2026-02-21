@@ -62,6 +62,9 @@ func newWatchCmd() *cobra.Command {
 			if baseCtx == nil {
 				baseCtx = context.Background()
 			}
+			if err := configureExerciseKubeconfigEnv(baseCtx, entry.Exercise); err != nil {
+				return err
+			}
 			ctx, cancel := context.WithCancel(baseCtx)
 			defer cancel()
 

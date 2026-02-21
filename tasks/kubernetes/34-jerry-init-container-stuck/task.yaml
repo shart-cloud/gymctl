@@ -1,0 +1,125 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-init-container-stuck
+  title: "Jerry's Init Container Won't Stop Crashing"
+  track: k8s-troubleshooting
+  week: 8
+  order: 34
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 25m
+  points: 120
+
+  description: |
+    Jerry added an init container to run a one-time DB migration before his app starts.
+    The pod keeps landing in `Init:CrashLoopBackOff` and the main app never launches.
+
+    Find what the init container is complaining about and fix it so the app can start.
+
+  learningOutcomes:
+    - "Diagnose init container failures from pod status and container logs"
+    - "Understand ConfigMap key references in env var definitions"
+    - "Recognize the difference between an absent key and an absent ConfigMap"
+
+  tags:
+    - troubleshooting
+    - init-containers
+    - configmap
+    - workloads
+    - pods
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+
+  checks:
+    - name: "Pod is not in Init:CrashLoopBackOff"
+      type: script
+      script: |
+        set -e
+        reason=$(kubectl get pods -l app=jerry-init-app \
+          -o jsonpath='{.items[0].status.initContainerStatuses[0].state.waiting.reason}' 2>/dev/null || true)
+        if [ "$reason" = "CrashLoopBackOff" ] || [ "$reason" = "Error" ]; then
+          echo "Init container is still in: $reason"
+          exit 1
+        fi
+        exit 0
+      expectExitCode: 0
+
+    - name: "Init container completed with exit code 0"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 60); do
+          exit_code=$(kubectl get pods -l app=jerry-init-app \
+            -o jsonpath='{.items[0].status.initContainerStatuses[0].state.terminated.exitCode}' 2>/dev/null || true)
+          if [ "$exit_code" = "0" ]; then
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "Init container did not complete successfully within 120s"
+        kubectl get pods -l app=jerry-init-app -o wide || true
+        exit 1
+      expectExitCode: 0
+
+    - name: "Main app container is Running"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 30); do
+          phase=$(kubectl get pods -l app=jerry-init-app \
+            -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Running" ]; then
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "Pod is not Running (phase=$phase)"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Deployment is Available"
+      type: condition
+      resource: deployment/jerry-init-app
+      condition: Available
+      status: "True"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Init container fixed and the app is running.
+
+    **Key takeaway:** `env.valueFrom.configMapKeyRef.key` must exactly match a key
+    that exists in the referenced ConfigMap — including case. With `optional: true`,
+    a missing key silently produces an empty variable, which is easy to miss until
+    the container logic itself catches and fails on the empty value.
+
+  tasking:
+    ticket: "OPS-3401"
+    priority: "P2"
+    summary: "jerry-init-app pods stuck in Init:CrashLoopBackOff since 11am push"
+    description: |
+      Jerry's latest deployment has been stuck with all pods in Init:CrashLoopBackOff
+      since the 11am push. The DB migration init container fails on every restart.
+      No traffic is reaching the app. Investigate and fix immediately.
+    reporter: "SRE-4"
+
+  jerryDialog:
+    onStart: "the init container just does a simple env print, it should be fine"
+    onCheckFail: "it's running, it's just... initializing"
+    onHintUsed: "wait, the key name matters?"
+    onComplete: "okay envFrom vs env valueFrom are not the same thing i get it now"

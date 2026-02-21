@@ -59,12 +59,15 @@ func newResetCmd() *cobra.Command {
 					return fmt.Errorf("missing kubernetes environment config")
 				}
 				k8s := exercise.Spec.Environment.Kubernetes
-				createCluster := true
-				if k8s.CreateCluster != nil {
-					createCluster = *k8s.CreateCluster
+				createCluster := shouldCreateCluster(k8s, opts.noCluster)
+				provider, state, err := resolveKubernetesProviderAndState(exercise.Metadata.Name, k8s)
+				if err != nil {
+					return err
 				}
-				if opts.noCluster {
-					createCluster = false
+
+				resetSpec := k8s
+				if !createCluster {
+					resetSpec = withCreateCluster(k8s, false)
 				}
 				namespace := k8s.Namespace
 				if namespace == "" {
@@ -72,28 +75,51 @@ func newResetCmd() *cobra.Command {
 				}
 
 				if createCluster {
-					manager := environment.KindManager{ClusterName: "jerry-gym"}
-					_ = manager.Delete(ctx)
-					if err := manager.Create(ctx, k8s.KindConfig); err != nil {
+					if err := provider.Reset(ctx, entry.Dir, resetSpec, state); err != nil {
+						return err
+					}
+				} else {
+					if err := provider.Ensure(ctx, entry.Dir, resetSpec, state); err != nil {
 						return err
 					}
 				}
 
+				if err := environment.SaveExerciseState(state); err != nil {
+					return err
+				}
+
+				if !environment.IsBareNodeKubernetes(k8s) {
+					kubeconfigPath, err := provider.ExportKubeconfig(ctx, state, "")
+					if err != nil {
+						return err
+					}
+					if err := environment.SaveExerciseState(state); err != nil {
+						return err
+					}
+					_ = os.Setenv("KUBECONFIG", kubeconfigPath)
+				}
+
+				if environment.IsBareNodeKubernetes(k8s) {
+					ColorInfo.Fprintln(cmd.OutOrStdout(), "Vagrant bare-node mode: skipping manifest apply and wait conditions until cluster bootstrap is done.")
+				}
+
 				manifests := environment.ResolveManifestPaths(entry.Dir, k8s.SetupManifests)
-				if len(manifests) > 0 {
+				if len(manifests) > 0 && !environment.IsBareNodeKubernetes(k8s) {
 					if err := environment.ApplyManifests(ctx, namespace, manifests); err != nil {
 						return err
 					}
 				}
 
-				for _, wait := range k8s.WaitFor {
-					if err := environment.WaitForCondition(ctx, namespace, wait.Resource, wait.Condition, wait.Timeout); err != nil {
-						return err
+				if !environment.IsBareNodeKubernetes(k8s) {
+					for _, wait := range k8s.WaitFor {
+						if err := environment.WaitForCondition(ctx, namespace, wait.Resource, wait.Condition, wait.Timeout); err != nil {
+							return err
+						}
 					}
 				}
 
 				if len(exercise.Spec.Environment.CustomSetup) > 0 {
-					if err := environment.RunCustomSetup(ctx, entry.Dir, exercise.Spec.Environment.CustomSetup); err != nil {
+					if err := environment.RunCustomSetup(ctx, entry.Dir, exercise, exercise.Spec.Environment.CustomSetup); err != nil {
 						return err
 					}
 				}
@@ -160,7 +186,7 @@ func newResetCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&opts.noCluster, "no-cluster", false, "Skip kind cluster recreation")
+	cmd.Flags().BoolVar(&opts.noCluster, "no-cluster", false, "Skip kubernetes cluster recreation")
 	cmd.Flags().BoolVar(&opts.keepWork, "keep-work", false, "Keep work directory contents")
 	return cmd
 }

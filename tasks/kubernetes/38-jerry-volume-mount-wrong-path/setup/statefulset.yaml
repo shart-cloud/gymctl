@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: jerry-db
+spec:
+  serviceName: jerry-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-db
+  template:
+    metadata:
+      labels:
+        app: jerry-db
+    spec:
+      containers:
+      - name: db
+        image: busybox:1.36
+        command: ["sh", "-c", "echo started >> /data/startup.log && sleep 3600"]
+        volumeMounts:
+        - name: data
+          mountPath: /cache
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: fast-local
+      resources:
+        requests:
+          storage: 1Gi

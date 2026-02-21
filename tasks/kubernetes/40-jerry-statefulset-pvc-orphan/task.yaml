@@ -1,0 +1,182 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-statefulset-pvc-orphan
+  title: "Jerry's StatefulSet Orphaned Its PVCs"
+  track: k8s-storage
+  week: 5
+  order: 6
+
+spec:
+  difficulty: advanced
+  estimatedTime: 30m
+  points: 150
+
+  description: |
+    Jerry deleted his StatefulSet when he meant to roll it back. The pods are
+    gone, but the PVCs that held his application data are still in the cluster.
+
+    A well-meaning teammate already tried to redeploy the StatefulSet — but
+    used a slightly different name, which created brand-new empty PVCs instead
+    of reconnecting to the existing data.
+
+    Reconcile the orphaned PVCs so the StatefulSet reattaches to the original
+    data, and verify the sentinel value written before the deletion is still
+    readable.
+
+  learningOutcomes:
+    - "Understand that StatefulSet deletion does not delete PVCs"
+    - "Identify orphaned PVCs from a deleted StatefulSet"
+    - "Restore a StatefulSet's connection to its existing PVC data"
+
+  tags:
+    - storage
+    - statefulset
+    - pvc
+    - orphan
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/storageclass.yaml
+    customSetup:
+      - type: script
+        timeout: 240s
+        script: |
+          set -e
+
+          kubectl apply -f - <<'MANIFEST'
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: jerry-db
+          spec:
+            serviceName: jerry-db
+            replicas: 2
+            selector:
+              matchLabels:
+                app: jerry-db
+            template:
+              metadata:
+                labels:
+                  app: jerry-db
+              spec:
+                containers:
+                - name: db
+                  image: busybox:1.36
+                  command: ["sh", "-c", "sleep 3600"]
+                  volumeMounts:
+                  - name: data
+                    mountPath: /data
+            volumeClaimTemplates:
+            - metadata:
+                name: data
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                storageClassName: fast-local
+                resources:
+                  requests:
+                    storage: 1Gi
+          MANIFEST
+
+          for i in $(seq 1 90); do
+            ready=$(kubectl get statefulset jerry-db -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)
+            if [ "$ready" = "2" ]; then break; fi
+            sleep 3
+          done
+
+          kubectl exec jerry-db-0 -- sh -c 'echo original-data-replica-0 > /data/sentinel'
+          kubectl exec jerry-db-1 -- sh -c 'echo original-data-replica-1 > /data/sentinel'
+
+          kubectl delete statefulset jerry-db
+
+          for i in $(seq 1 60); do
+            count=$(kubectl get pods -l app=jerry-db --no-headers 2>/dev/null | wc -l | tr -d ' ')
+            if [ "$count" = "0" ]; then break; fi
+            sleep 2
+          done
+
+          kubectl apply -f - <<'MANIFEST'
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: jerry-db-v2
+          spec:
+            serviceName: jerry-db-v2
+            replicas: 2
+            selector:
+              matchLabels:
+                app: jerry-db-v2
+            template:
+              metadata:
+                labels:
+                  app: jerry-db-v2
+              spec:
+                containers:
+                - name: db
+                  image: busybox:1.36
+                  command: ["sh", "-c", "sleep 3600"]
+                  volumeMounts:
+                  - name: data
+                    mountPath: /data
+            volumeClaimTemplates:
+            - metadata:
+                name: data
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                storageClassName: fast-local
+                resources:
+                  requests:
+                    storage: 1Gi
+          MANIFEST
+
+  checks:
+    - name: "Original PVCs still exist"
+      type: script
+      script: |
+        set -e
+        kubectl get pvc data-jerry-db-0 >/dev/null 2>&1
+        kubectl get pvc data-jerry-db-1 >/dev/null 2>&1
+      expectExitCode: 0
+
+    - name: "StatefulSet jerry-db is running (not jerry-db-v2)"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 60); do
+          ready=$(kubectl get statefulset jerry-db -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)
+          if [ "$ready" = "2" ]; then exit 0; fi
+          sleep 3
+        done
+        echo "FAIL: jerry-db not ready with 2 replicas"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Original sentinel data is readable"
+      type: script
+      script: |
+        set -e
+        kubectl exec jerry-db-0 -- grep -q original-data-replica-0 /data/sentinel
+        kubectl exec jerry-db-1 -- grep -q original-data-replica-1 /data/sentinel
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    StatefulSet reconnected to its original PVCs.
+
+    **Key takeaway:** StatefulSet deletion never deletes PVCs. PVC naming is
+    deterministic: <volumeClaimTemplate.name>-<statefulset.name>-<ordinal>.
+    Redeploy the StatefulSet with the original name and it reattaches
+    automatically — no data migration needed.

@@ -56,11 +56,43 @@ or directly exec into the workstation container if --workstation is used.`,
 
 func execIntoWorkstation(cmd *cobra.Command) error {
 	ctx := cmd.Context()
+	envVars := map[string]string{}
 
 	// Get current exercise if one is active
 	currentExercise, err := loadCurrentExercise()
 	if err != nil {
 		fmt.Fprintf(cmd.OutOrStderr(), "Warning: No current exercise found (%v)\n", err)
+	} else {
+		entries, loadErr := scenario.LoadCatalog(tasksDir)
+		if loadErr == nil {
+			if entry, found := scenario.FindByName(entries, currentExercise); found {
+				collected, warnings, envErr := collectExerciseEnv(ctx, entry.Exercise)
+				if envErr != nil {
+					fmt.Fprintf(cmd.OutOrStderr(), "Warning: Could not resolve exercise environment variables: %v\n", envErr)
+				} else {
+					envVars = collected
+				}
+				for _, warning := range warnings {
+					fmt.Fprintf(cmd.OutOrStderr(), "Warning: %s\n", warning)
+				}
+			}
+		}
+
+		if state, stateErr := environment.LoadExerciseState(currentExercise); stateErr == nil && state != nil {
+			if state.Kubeconfig != "" {
+				containerPath := state.Kubeconfig
+				if homeDir, homeErr := os.UserHomeDir(); homeErr == nil {
+					prefix := filepath.Join(homeDir, ".gym")
+					if rel, relErr := filepath.Rel(prefix, state.Kubeconfig); relErr == nil {
+						if len(rel) > 0 && rel[0] != '.' {
+							containerPath = filepath.Join("/home/student/.gym", rel)
+						}
+					}
+				}
+				envVars["GYM_KUBECONFIG"] = containerPath
+				envVars["KUBECONFIG"] = containerPath
+			}
+		}
 	}
 
 	// Ensure workstation is running
@@ -97,5 +129,5 @@ func execIntoWorkstation(cmd *cobra.Command) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "Dropping into workstation container...\n")
 	fmt.Fprintf(cmd.OutOrStdout(), "Type 'exit' to return to host shell.\n\n")
 
-	return manager.ExecShell(ctx, workDir)
+	return manager.ExecShell(ctx, workDir, envVars)
 }

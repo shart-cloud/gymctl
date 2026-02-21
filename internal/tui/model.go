@@ -2,15 +2,16 @@ package tui
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
+	"gymctl/internal/environment"
 	"gymctl/internal/progress"
 	"gymctl/internal/scenario"
 )
@@ -35,6 +36,10 @@ type trackSummary struct {
 type startDoneMsg struct{ err error }
 type shellExitMsg struct{ err error }
 type progressReloadedMsg struct{ prog *progress.File }
+type actionDoneMsg struct {
+	action string
+	err    error
+}
 
 type Model struct {
 	view           viewState
@@ -49,19 +54,31 @@ type Model struct {
 	selectedEx     *scenario.Exercise
 	selectedExPath string
 	hintContent    string
-	startChoice    int // 0 = "Work on it", 1 = "Exit TUI"
+	startChoice    int
 	width          int
 	height         int
 	err            error
+	statusLine     string
+
+	// greeting is chosen once at startup so it doesn't change throughout the session.
+	greeting string
+	// listScroll is the scroll offset for the exercise list view.
+	listScroll int
+	// hintScroll is the scroll offset for the hint view.
+	hintScroll int
+	// exState caches the on-disk ExerciseState for the selected exercise.
+	// It is reloaded when navigating to the detail view and after actions complete.
+	// Keeping it cached avoids a disk read on every TUI render tick.
+	exState *environment.ExerciseState
 }
 
 var grimGreetings = []string{
-	"GRIM-9 ONLINE. Outstanding tickets await your attention.",
-	"Good cycle. Jerry has filed more tickets. Surprise.",
-	"All systems nominal. Except Jerry. Jerry is never nominal.",
-	"Your sprint board is full. Jerry's doing. As always.",
-	"GRIM-9 reporting: ticket queue non-empty. Handle accordingly.",
-	"Another day, another Jerry incident. Your queue awaits.",
+	"GRIM-9 online. Let's clean up Jerry's latest messes.",
+	"Fresh queue loaded. Pick a ticket and speedrun it.",
+	"Ops desk ready. Chaos level: manageable.",
+	"Mission board updated. You're on triage duty.",
+	"Welcome back. The cluster is weird again.",
+	"Ticket arcade open. Score points by fixing outages.",
 }
 
 func NewModel(catalog []scenario.CatalogEntry, prog *progress.File, tasksDir, progressPath string) Model {
@@ -71,6 +88,7 @@ func NewModel(catalog []scenario.CatalogEntry, prog *progress.File, tasksDir, pr
 		prog:         prog,
 		tasksDir:     tasksDir,
 		progressPath: progressPath,
+		greeting:     grimGreetings[rand.Intn(len(grimGreetings))],
 	}
 	m.buildTracks()
 	return m
@@ -141,9 +159,46 @@ func (m Model) overallProgress() (int, int) {
 	return done, total
 }
 
-func grimGreeting() string {
-	h := time.Now().Hour()
-	return grimGreetings[h%len(grimGreetings)]
+// activeExerciseName returns the name of the currently in_progress exercise, if any.
+func (m Model) activeExerciseName() string {
+	for name, st := range m.prog.Exercises {
+		if st.Status == "in_progress" {
+			return name
+		}
+	}
+	return ""
+}
+
+// visibleListRows returns how many exercise rows fit given the current terminal height.
+func (m Model) visibleListRows() int {
+	// overhead: top padding + track badge + panel borders + title + footer
+	const overhead = 12
+	v := m.height - overhead
+	if v < 5 {
+		return 5
+	}
+	return v
+}
+
+// visibleHintRows returns how many hint content lines fit given the current terminal height.
+func (m Model) visibleHintRows() int {
+	const overhead = 8
+	v := m.height - overhead
+	if v < 5 {
+		return 5
+	}
+	return v
+}
+
+// reloadState loads ExerciseState from disk for the selected exercise and caches it.
+// Call this after navigating to an exercise and after any action that may change state.
+func (m *Model) reloadState() {
+	if m.selectedEx == nil {
+		m.exState = nil
+		return
+	}
+	state, _ := environment.LoadExerciseState(m.selectedEx.Metadata.Name)
+	m.exState = state
 }
 
 // Init implements tea.Model.
@@ -165,21 +220,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case startDoneMsg:
 		if msg.err != nil {
 			m.err = msg.err
+			m.statusLine = fmt.Sprintf("start failed: %v", msg.err)
 			return m, nil
 		}
-		// Drop into workstation container
+		// Pick the right post-start action based on exercise type.
+		ex := m.selectedEx
+		if ex != nil {
+			switch {
+			case ex.Spec.Environment.Type == "kubernetes" &&
+				ex.Spec.Environment.Kubernetes != nil &&
+				ex.Spec.Environment.Kubernetes.Provider == "vagrant":
+				// Vagrant: SSH into the control plane instead of launching a Docker workstation.
+				sshCmd := newGymctlSSHCmd(m.tasksDir, "cp-1", ex.Metadata.Name)
+				return m, tea.ExecProcess(sshCmd, func(err error) tea.Msg {
+					return shellExitMsg{err}
+				})
+			case ex.Spec.Environment.Type == "docker":
+				// Docker: environment is now running locally, just return to detail view.
+				return m, func() tea.Msg { return shellExitMsg{nil} }
+			}
+		}
+		// Default (Kind): drop into workstation container.
 		workstationCmd := newWorkstationExecCmd(m.selectedEx.Metadata.Name)
 		return m, tea.ExecProcess(workstationCmd, func(err error) tea.Msg {
 			return shellExitMsg{err}
 		})
 
 	case shellExitMsg:
-		// Reload progress and return to exercise detail
 		if prog, err := progress.Load(m.progressPath); err == nil {
 			m.prog = prog
 			m.buildTracks()
 		}
+		m.reloadState()
 		m.view = viewExerciseDetail
+		if msg.err != nil {
+			m.statusLine = fmt.Sprintf("action ended with error: %v", msg.err)
+		} else {
+			m.statusLine = "returned from shell"
+		}
+		return m, nil
+
+	case actionDoneMsg:
+		if prog, err := progress.Load(m.progressPath); err == nil {
+			m.prog = prog
+			m.buildTracks()
+		}
+		m.reloadState()
+		m.view = viewExerciseDetail
+		if msg.err != nil {
+			m.statusLine = fmt.Sprintf("%s failed: %v", msg.action, msg.err)
+		} else {
+			m.statusLine = fmt.Sprintf("%s complete", msg.action)
+		}
 		return m, nil
 	}
 
@@ -192,7 +284,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.view {
 	case viewHome:
 		switch key {
-		case "enter":
+		case "enter", "ctrl+m":
 			m.view = viewTrackSelect
 			m.trackCursor = 0
 		case "q", "ctrl+c":
@@ -201,18 +293,28 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case viewTrackSelect:
 		switch key {
-		case "up", "k":
+		case "up", "k", "shift+tab":
 			if m.trackCursor > 0 {
 				m.trackCursor--
 			}
-		case "down", "j":
+		case "down", "j", "tab":
 			if m.trackCursor < len(m.tracks)-1 {
 				m.trackCursor++
 			}
-		case "enter":
+		case "enter", "ctrl+m", "l":
 			if len(m.tracks) > 0 {
 				m.selectedTrack = m.tracks[m.trackCursor].name
 				m.exerciseCursor = 0
+				m.listScroll = 0
+				m.view = viewExerciseList
+			}
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+			idx := int(key[0] - '1')
+			if idx >= 0 && idx < len(m.tracks) {
+				m.trackCursor = idx
+				m.selectedTrack = m.tracks[m.trackCursor].name
+				m.exerciseCursor = 0
+				m.listScroll = 0
 				m.view = viewExerciseList
 			}
 		case "b", "esc":
@@ -223,21 +325,51 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case viewExerciseList:
 		exercises := m.trackExercises()
+		visRows := m.visibleListRows()
 		switch key {
-		case "up", "k":
+		case "up", "k", "shift+tab":
 			if m.exerciseCursor > 0 {
 				m.exerciseCursor--
 			}
-		case "down", "j":
+			// Keep cursor within visible window.
+			if m.exerciseCursor < m.listScroll {
+				m.listScroll = m.exerciseCursor
+			}
+		case "down", "j", "tab":
 			if m.exerciseCursor < len(exercises)-1 {
 				m.exerciseCursor++
 			}
-		case "enter":
+			// Scroll down if cursor moved below the visible window.
+			if m.exerciseCursor >= m.listScroll+visRows {
+				m.listScroll = m.exerciseCursor - visRows + 1
+			}
+		case "enter", "ctrl+m", "l":
 			if len(exercises) > 0 {
 				entry := exercises[m.exerciseCursor]
 				m.selectedEx = entry.Exercise
 				m.selectedExPath = entry.Dir
 				m.hintContent = ""
+				m.statusLine = ""
+				m.reloadState()
+				m.view = viewExerciseDetail
+			}
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+			idx := int(key[0] - '1')
+			if idx >= 0 && idx < len(exercises) {
+				m.exerciseCursor = idx
+				// Scroll to show the quick-selected exercise.
+				if m.exerciseCursor < m.listScroll {
+					m.listScroll = m.exerciseCursor
+				}
+				if m.exerciseCursor >= m.listScroll+visRows {
+					m.listScroll = m.exerciseCursor - visRows + 1
+				}
+				entry := exercises[m.exerciseCursor]
+				m.selectedEx = entry.Exercise
+				m.selectedExPath = entry.Dir
+				m.hintContent = ""
+				m.statusLine = ""
+				m.reloadState()
 				m.view = viewExerciseDetail
 			}
 		case "b", "esc":
@@ -253,18 +385,76 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.startChoice = 0
 				m.view = viewStartConfirm
 			}
+		case "r":
+			if !m.isLocked(m.selectedEx) {
+				resetCmd := newGymctlResetCmd(m.tasksDir, m.selectedEx.Metadata.Name)
+				return m, tea.ExecProcess(resetCmd, func(err error) tea.Msg {
+					return actionDoneMsg{action: "reset", err: err}
+				})
+			}
+		case "c":
+			checkCmd := newGymctlCheckCmd(m.tasksDir, m.selectedEx.Metadata.Name)
+			return m, tea.ExecProcess(checkCmd, func(err error) tea.Msg {
+				return actionDoneMsg{action: "check", err: err}
+			})
+		case "e":
+			envCmd := newGymctlEnvCmd(m.tasksDir, m.selectedEx.Metadata.Name)
+			return m, tea.ExecProcess(envCmd, func(err error) tea.Msg {
+				return actionDoneMsg{action: "env", err: err}
+			})
+		case "k":
+			kubeconfigCmd := newGymctlKubeconfigCmd(m.tasksDir, m.selectedEx.Metadata.Name)
+			return m, tea.ExecProcess(kubeconfigCmd, func(err error) tea.Msg {
+				return actionDoneMsg{action: "kubeconfig", err: err}
+			})
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+			nodes := m.selectedNodeRefs()
+			idx := int(key[0] - '1')
+			if idx >= 0 && idx < len(nodes) {
+				sshCmd := newGymctlSSHCmd(m.tasksDir, nodes[idx], m.selectedEx.Metadata.Name)
+				return m, tea.ExecProcess(sshCmd, func(err error) tea.Msg {
+					return actionDoneMsg{action: "ssh", err: err}
+				})
+			}
 		case "h":
 			m.hintContent = m.loadFreeHint()
+			m.hintScroll = 0
 			m.view = viewHintPeek
 		case "b", "esc":
+			// Clear status when leaving the detail view so stale messages don't persist.
+			m.statusLine = ""
 			m.view = viewExerciseList
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		}
 
 	case viewHintPeek:
+		lines := strings.Split(m.hintContent, "\n")
+		maxScroll := len(lines) - m.visibleHintRows()
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
 		switch key {
+		case "up", "k":
+			if m.hintScroll > 0 {
+				m.hintScroll--
+			}
+		case "down", "j":
+			if m.hintScroll < maxScroll {
+				m.hintScroll++
+			}
+		case "pgup", "ctrl+u":
+			m.hintScroll -= m.visibleHintRows() / 2
+			if m.hintScroll < 0 {
+				m.hintScroll = 0
+			}
+		case "pgdn", "ctrl+d":
+			m.hintScroll += m.visibleHintRows() / 2
+			if m.hintScroll > maxScroll {
+				m.hintScroll = maxScroll
+			}
 		case "b", "esc", "enter":
+			m.hintScroll = 0
 			m.view = viewExerciseDetail
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -282,13 +472,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if m.startChoice == 0 {
-				// Mode A: run gymctl start, then drop into shell
 				startCmd := newGymctlStartCmd(m.tasksDir, m.selectedEx.Metadata.Name)
 				return m, tea.ExecProcess(startCmd, func(err error) tea.Msg {
 					return startDoneMsg{err}
 				})
 			}
-			// Mode B: exit TUI, print reminder
+			// Exit TUI, print reminder to the terminal.
 			fmt.Printf("\nRun: gymctl start %s\n", m.selectedEx.Metadata.Name)
 			return m, tea.Quit
 		case "esc":
@@ -319,6 +508,69 @@ func (m Model) loadFreeHint() string {
 	return "(no free hint available)"
 }
 
+// selectedNodeRefs returns sorted node reference names from the cached exercise state.
+// Control-plane nodes are ordered before worker nodes.
+func (m Model) selectedNodeRefs() []string {
+	if m.exState == nil || len(m.exState.Nodes) == 0 {
+		return nil
+	}
+	nodes := make([]string, 0, len(m.exState.Nodes))
+	for logical := range m.exState.Nodes {
+		nodes = append(nodes, logical)
+	}
+	sort.Slice(nodes, func(i, j int) bool {
+		a := nodes[i]
+		b := nodes[j]
+		if strings.HasPrefix(a, "cp-") && strings.HasPrefix(b, "worker-") {
+			return true
+		}
+		if strings.HasPrefix(a, "worker-") && strings.HasPrefix(b, "cp-") {
+			return false
+		}
+		return a < b
+	})
+	return nodes
+}
+
+// renderEnvironmentPanel uses the cached exState — no disk reads inside View().
+func (m Model) renderEnvironmentPanel(ex *scenario.Exercise) string {
+	if ex == nil || ex.Spec.Environment.Type != "kubernetes" {
+		return ""
+	}
+	state := m.exState
+	if state == nil {
+		return StyleDim.Render("Environment: not started yet")
+	}
+
+	var b strings.Builder
+	provider := state.Provider
+	if provider == "" {
+		provider = "kubernetes"
+	}
+	b.WriteString(StyleBody.Render(fmt.Sprintf("Provider: %s", provider)) + "\n")
+
+	if ex.Spec.Environment.Kubernetes != nil && ex.Spec.Environment.Kubernetes.Provider == "vagrant" {
+		mode := environment.ResolveVagrantBootstrapMode(ex.Spec.Environment.Kubernetes)
+		b.WriteString(StyleBody.Render(fmt.Sprintf("Mode: %s", mode)) + "\n")
+	}
+
+	if state.Kubeconfig != "" {
+		b.WriteString(StyleBody.Render("Kubeconfig: ready") + "\n")
+	} else {
+		b.WriteString(StyleDim.Render("Kubeconfig: not exported") + "\n")
+	}
+
+	nodes := m.selectedNodeRefs()
+	if len(nodes) > 0 {
+		for i, node := range nodes {
+			runtimeName := state.Nodes[node]
+			b.WriteString(StyleDim.Render(fmt.Sprintf("[%d] ssh %s (%s)", i+1, node, runtimeName)) + "\n")
+		}
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // View implements tea.Model.
 func (m Model) View() string {
 	switch m.view {
@@ -340,47 +592,48 @@ func (m Model) View() string {
 
 func (m Model) viewHome() string {
 	var b strings.Builder
+	b.WriteString(renderGRIMHeader(m.width) + "\n\n")
 
-	// Enhanced GRIM header
-	b.WriteString(renderGRIMHeader() + "\n\n")
-
-	// Status message with enhanced styling
-	greeting := grimGreeting()
-	b.WriteString("  " + StyleCard.Render("💬 GRIM Status: "+greeting) + "\n\n")
-
-	// Enhanced progress section
 	done, total := m.overallProgress()
 
-	b.WriteString("  " + StyleSectionTitle.Render("📊 SPRINT PROGRESS") + "\n")
-
-	bar := renderProgressBar(done, total, 40)
-	progressText := fmt.Sprintf("  %s", bar)
-	b.WriteString(progressText + "\n")
-
-	// Progress details
-	completionText := fmt.Sprintf("  %s exercises completed out of %s total",
+	// Scale progress bar to terminal width.
+	barWidth := 40
+	if m.width > 0 && m.width-20 < barWidth {
+		barWidth = m.width - 20
+	}
+	if barWidth < 10 {
+		barWidth = 10
+	}
+	bar := renderProgressBar(done, total, barWidth)
+	progressText := fmt.Sprintf("%s\n\n%s exercises completed out of %s total",
+		bar,
 		StyleHighlight.Render(fmt.Sprintf("%d", done)),
 		StyleHighlight.Render(fmt.Sprintf("%d", total)))
-	b.WriteString(StyleBody.Render(completionText) + "\n\n")
 
-	// Track overview
+	tracksBody := "No tracks found."
 	if len(m.tracks) > 0 {
-		b.WriteString("  " + StyleSectionTitle.Render("📚 AVAILABLE TRACKS") + "\n")
+		lines := make([]string, 0, len(m.tracks))
 		for _, track := range m.tracks {
 			trackProgress := renderProgressBar(track.completed, track.total, 20)
-			trackLine := fmt.Sprintf("  %s %s  %s",
-				StyleHighlight.Render("▸"),
-				StyleBody.Render(track.name),
-				trackProgress)
-			b.WriteString(trackLine + "\n")
+			lines = append(lines, fmt.Sprintf("%s %s  %s", StyleHighlight.Render("▸"), StyleBody.Render(track.name), trackProgress))
 		}
-		b.WriteString("\n")
+		tracksBody = strings.Join(lines, "\n")
 	}
 
-	// Enhanced controls
-	b.WriteString("  " + StyleSectionTitle.Render("🎮 CONTROLS") + "\n")
-	b.WriteString("  " + StyleKey.Render(" Enter ") + StyleFooter.Render(" Browse Exercise Catalog") + "\n")
-	b.WriteString("  " + StyleKey.Render("   q   ") + StyleFooter.Render(" Exit GRIM System") + "\n")
+	b.WriteString("  " + renderPanel("Shift Brief", "💬 "+m.greeting) + "\n")
+	b.WriteString("  " + renderPanel("Sprint Progress", progressText) + "\n")
+	b.WriteString("  " + renderPanel("Tracks", tracksBody) + "\n")
+
+	// Surface the currently active exercise so students can quickly resume.
+	if active := m.activeExerciseName(); active != "" {
+		b.WriteString("  " + renderPanel("Active Exercise",
+			StyleWarning.Render("◉  ")+StyleBody.Render(active)+" — press Enter to browse") + "\n")
+	}
+
+	b.WriteString("  " + renderPanel("Controls", strings.Join([]string{
+		StyleKey.Render(" Enter ") + StyleFooter.Render(" Browse Exercise Catalog"),
+		StyleKey.Render("   q   ") + StyleFooter.Render(" Exit Ops Desk"),
+	}, "\n")) + "\n")
 
 	return b.String()
 }
@@ -389,22 +642,27 @@ func (m Model) viewTrackSelect() string {
 	var b strings.Builder
 
 	b.WriteString("\n")
-	b.WriteString("  " + StyleSectionTitle.Render("Select Track") + "\n\n")
+	b.WriteString("  " + StyleSectionTitle.Render("Mission Tracks") + "\n\n")
 
-	for i, t := range m.tracks {
-		cursor := "  "
-		line := fmt.Sprintf("%s  ·  %d/%d complete", t.name, t.completed, t.total)
-		if i == m.trackCursor {
-			cursor = "> "
-			b.WriteString(StyleSelected.Render(cursor+line) + "\n")
-		} else {
-			b.WriteString("  " + StyleBody.Render(line) + "\n")
-		}
+	var lines []string
+	if len(m.tracks) == 0 {
+		lines = append(lines, StyleDim.Render("No tracks discovered in tasks catalog."))
 	}
 
+	for i, t := range m.tracks {
+		line := fmt.Sprintf("%d. %s  ·  %d/%d complete", i+1, t.name, t.completed, t.total)
+		if i == m.trackCursor {
+			lines = append(lines, StyleSelected.Render("> "+line))
+		} else {
+			lines = append(lines, "  "+StyleBody.Render(line))
+		}
+	}
+	b.WriteString("  " + renderPanel("Track Queue", strings.Join(lines, "\n")) + "\n")
+
 	b.WriteString("\n")
-	b.WriteString("  " + StyleKey.Render("[↑↓/jk]") + StyleFooter.Render(" Move") + "   ")
+	b.WriteString("  " + StyleKey.Render("[↑↓/jk/tab]") + StyleFooter.Render(" Move") + "   ")
 	b.WriteString(StyleKey.Render("[Enter]") + StyleFooter.Render(" Select") + "   ")
+	b.WriteString(StyleKey.Render("[1-9]") + StyleFooter.Render(" Quick Select") + "   ")
 	b.WriteString(StyleKey.Render("[b]") + StyleFooter.Render(" Back") + "   ")
 	b.WriteString(StyleKey.Render("[q]") + StyleFooter.Render(" Quit") + "\n")
 
@@ -414,16 +672,25 @@ func (m Model) viewTrackSelect() string {
 func (m Model) viewExerciseList() string {
 	var b strings.Builder
 	exercises := m.trackExercises()
+	visRows := m.visibleListRows()
 
 	b.WriteString("\n")
 	b.WriteString("  " + StyleTrack.Render(m.selectedTrack) + "\n\n")
 
-	for i, entry := range exercises {
+	// Compute the visible window.
+	start := m.listScroll
+	end := start + visRows
+	if end > len(exercises) {
+		end = len(exercises)
+	}
+
+	var lines []string
+	for i := start; i < end; i++ {
+		entry := exercises[i]
 		ex := entry.Exercise
 		name := ex.Metadata.Name
 		locked := m.isLocked(ex)
 
-		// Status icon
 		var statusIcon string
 		if st, ok := m.prog.Exercises[name]; ok {
 			switch st.Status {
@@ -438,10 +705,7 @@ func (m Model) viewExerciseList() string {
 			statusIcon = StyleDim.Render("◌")
 		}
 
-		// Difficulty badge
 		diff := DifficultyStyle(ex.Spec.Difficulty).Render(ex.Spec.Difficulty)
-
-		// Time
 		timeStr := ""
 		if ex.Spec.EstimatedTime != "" {
 			timeStr = StyleDim.Render(" · " + ex.Spec.EstimatedTime)
@@ -470,16 +734,36 @@ func (m Model) viewExerciseList() string {
 			)
 		}
 
+		// Labels use absolute indices so [1-9] quick-select is always consistent.
 		if i == m.exerciseCursor {
-			b.WriteString(StyleSelected.Render("> "+lineContent) + "\n")
+			lines = append(lines, StyleSelected.Render(fmt.Sprintf("> %d. %s", i+1, lineContent)))
 		} else {
-			b.WriteString("  " + lineContent + "\n")
+			lines = append(lines, fmt.Sprintf("  %d. %s", i+1, lineContent))
 		}
 	}
+	if len(exercises) == 0 {
+		lines = append(lines, StyleDim.Render("No exercises in this track."))
+	}
+
+	// Append a scroll position indicator when the list doesn't fit on screen.
+	scrollHint := ""
+	if len(exercises) > visRows {
+		indicator := fmt.Sprintf("showing %d–%d of %d", start+1, end, len(exercises))
+		if m.listScroll > 0 {
+			indicator = "↑ " + indicator
+		}
+		if end < len(exercises) {
+			indicator += " ↓"
+		}
+		scrollHint = "\n  " + StyleDim.Render(indicator)
+	}
+
+	b.WriteString("  " + renderPanel("Mission Queue", strings.Join(lines, "\n")+scrollHint) + "\n")
 
 	b.WriteString("\n")
 	b.WriteString("  " + StyleKey.Render("[↑↓/jk]") + StyleFooter.Render(" Move") + "   ")
 	b.WriteString(StyleKey.Render("[Enter]") + StyleFooter.Render(" Open") + "   ")
+	b.WriteString(StyleKey.Render("[1-9]") + StyleFooter.Render(" Quick Open") + "   ")
 	b.WriteString(StyleKey.Render("[b]") + StyleFooter.Render(" Back") + "   ")
 	b.WriteString(StyleKey.Render("[q]") + StyleFooter.Render(" Quit") + "\n")
 
@@ -493,21 +777,18 @@ func (m Model) viewExerciseDetail() string {
 	b.WriteString("\n")
 	b.WriteString(m.renderGRIMTicket(ex) + "\n")
 
-	// Learning outcomes
+	var brief []string
+
 	if len(ex.Spec.LearningOutcomes) > 0 {
-		b.WriteString(StyleSectionTitle.Render("  Learning Outcomes") + "\n")
 		for _, lo := range ex.Spec.LearningOutcomes {
-			b.WriteString("  • " + StyleBody.Render(lo) + "\n")
+			brief = append(brief, "• "+StyleBody.Render(lo))
 		}
-		b.WriteString("\n")
 	}
 
-	// Tags
 	if len(ex.Spec.Tags) > 0 {
-		b.WriteString("  " + StyleDim.Render("Tags: "+strings.Join(ex.Spec.Tags, ", ")) + "\n")
+		brief = append(brief, StyleDim.Render("Tags: "+strings.Join(ex.Spec.Tags, ", ")))
 	}
 
-	// Time / Points
 	meta := []string{}
 	if ex.Spec.EstimatedTime != "" {
 		meta = append(meta, "⏱ "+ex.Spec.EstimatedTime)
@@ -516,17 +797,28 @@ func (m Model) viewExerciseDetail() string {
 		meta = append(meta, fmt.Sprintf("★ %d pts", ex.Spec.Points))
 	}
 	if len(meta) > 0 {
-		b.WriteString("  " + StyleDim.Render(strings.Join(meta, "   ")) + "\n")
+		brief = append(brief, StyleDim.Render(strings.Join(meta, "   ")))
+	}
+	if len(brief) > 0 {
+		b.WriteString("  " + renderPanel("Mission Brief", strings.Join(brief, "\n")) + "\n")
 	}
 
+	b.WriteString("\n")
+	envContent := strings.TrimSpace(m.renderEnvironmentPanel(ex))
+	if envContent == "" {
+		envContent = StyleDim.Render("No environment info available")
+	}
+	b.WriteString("  " + renderPanel("Environment", envContent) + "\n")
 	b.WriteString("\n")
 
 	// Footer keybinds
 	locked := m.isLocked(ex)
 	if locked {
 		b.WriteString("  " + StyleDim.Render("[s] Start (locked)") + "   ")
+		b.WriteString(StyleDim.Render("[r] Reset (locked)") + "   ")
 	} else {
 		b.WriteString("  " + StyleKey.Render("[s]") + StyleFooter.Render(" Start") + "   ")
+		b.WriteString(StyleKey.Render("[r]") + StyleFooter.Render(" Reset") + "   ")
 	}
 
 	hasFreeHint := false
@@ -539,14 +831,37 @@ func (m Model) viewExerciseDetail() string {
 	if hasFreeHint {
 		b.WriteString(StyleKey.Render("[h]") + StyleFooter.Render(" Hint") + "   ")
 	}
+	b.WriteString(StyleKey.Render("[c]") + StyleFooter.Render(" Check") + "   ")
+	b.WriteString(StyleKey.Render("[e]") + StyleFooter.Render(" Env") + "   ")
+	b.WriteString(StyleKey.Render("[k]") + StyleFooter.Render(" Kubeconfig") + "   ")
 	b.WriteString(StyleKey.Render("[b]") + StyleFooter.Render(" Back") + "   ")
 	b.WriteString(StyleKey.Render("[q]") + StyleFooter.Render(" Quit") + "\n")
+
+	if m.statusLine != "" {
+		b.WriteString("\n")
+		// Colour the status line based on outcome.
+		statusStyle := StyleDim
+		switch {
+		case strings.Contains(m.statusLine, "failed") || strings.Contains(m.statusLine, "error"):
+			statusStyle = StyleError
+		case strings.Contains(m.statusLine, "complete"):
+			statusStyle = StyleSuccess
+		}
+		b.WriteString("  " + renderPanel("Latest Action", statusStyle.Render(m.statusLine)) + "\n")
+	}
 
 	return b.String()
 }
 
+// renderGRIMTicket renders the JIRA-style ticket box, responsive to terminal width.
 func (m Model) renderGRIMTicket(ex *scenario.Exercise) string {
-	const boxWidth = 68
+	boxWidth := m.width - 6 // subtract indent + border chars
+	if boxWidth < 50 {
+		boxWidth = 50
+	}
+	if boxWidth > 100 {
+		boxWidth = 100
+	}
 
 	var b strings.Builder
 	t := ex.Spec.Tasking
@@ -583,13 +898,11 @@ func (m Model) renderGRIMTicket(ex *scenario.Exercise) string {
 		pStyle.Render(priority),
 		StyleSectionTitle.Render(strings.ToUpper(summary)),
 	)
-	// Pad to boxWidth
 	b.WriteString(header + "\n")
 
 	sep := "  ├" + strings.Repeat("─", boxWidth) + "┤"
 	b.WriteString(dim(sep) + "\n")
 
-	// Word-wrapped description
 	for _, line := range wordWrap(description, boxWidth-4) {
 		if line == "" {
 			b.WriteString("  │\n")
@@ -608,19 +921,56 @@ func (m Model) renderGRIMTicket(ex *scenario.Exercise) string {
 	return b.String()
 }
 
+func renderPanel(title, body string) string {
+	header := StyleCardTitle.Render(title)
+	content := StyleCardBody.Render(strings.TrimSpace(body))
+	return StyleCard.Render(header + "\n" + content)
+}
+
 func (m Model) viewHintPeek() string {
 	var b strings.Builder
 
-	b.WriteString("\n")
-	b.WriteString("  " + StyleSectionTitle.Render("Hint 1 (free)") + "\n")
-	b.WriteString("  " + StyleDim.Render(strings.Repeat("─", 60)) + "\n\n")
-
-	for _, line := range strings.Split(m.hintContent, "\n") {
-		b.WriteString("  " + StyleBody.Render(line) + "\n")
+	// Count free hints for an accurate title.
+	freeHintCount := 0
+	for _, h := range m.selectedEx.Spec.Hints {
+		if h.Cost == 0 {
+			freeHintCount++
+		}
+	}
+	hintTitle := "Free Hint"
+	if freeHintCount > 1 {
+		hintTitle = fmt.Sprintf("Free Hints (%d available)", freeHintCount)
 	}
 
 	b.WriteString("\n")
-	b.WriteString("  " + StyleKey.Render("[b]") + StyleFooter.Render(" Back") + "\n")
+	b.WriteString("  " + StyleSectionTitle.Render(hintTitle) + "\n")
+	b.WriteString("  " + StyleDim.Render(strings.Repeat("─", 60)) + "\n\n")
+
+	lines := strings.Split(m.hintContent, "\n")
+	visRows := m.visibleHintRows()
+	start := m.hintScroll
+	end := start + visRows
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	for _, line := range lines[start:end] {
+		// Render lines that look like shell commands (start with $) in accent colour.
+		if strings.HasPrefix(strings.TrimSpace(line), "$") || strings.HasPrefix(line, "    ") {
+			b.WriteString("  " + StyleHighlight.Render(line) + "\n")
+		} else {
+			b.WriteString("  " + StyleBody.Render(line) + "\n")
+		}
+	}
+
+	if len(lines) > visRows {
+		b.WriteString("\n")
+		b.WriteString("  " + StyleDim.Render(
+			fmt.Sprintf("[↑↓/jk · PgUp/PgDn — line %d/%d]", m.hintScroll+1, len(lines))) + "\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString("  " + StyleKey.Render("[b/Esc]") + StyleFooter.Render(" Back") + "\n")
 
 	return b.String()
 }
@@ -632,9 +982,25 @@ func (m Model) viewStartConfirm() string {
 	b.WriteString("  " + StyleSectionTitle.Render("Start Exercise") + "\n\n")
 	b.WriteString("  " + StyleBody.Render("How would you like to proceed?") + "\n\n")
 
+	// Primary action label reflects the exercise type so the choice is unambiguous.
+	primaryAction := "Start exercise"
+	ex := m.selectedEx
+	if ex != nil {
+		switch {
+		case ex.Spec.Environment.Type == "kubernetes" &&
+			ex.Spec.Environment.Kubernetes != nil &&
+			ex.Spec.Environment.Kubernetes.Provider == "vagrant":
+			primaryAction = "Start VMs & SSH into control plane"
+		case ex.Spec.Environment.Type == "docker":
+			primaryAction = "Start docker environment"
+		case ex.Spec.Environment.Type == "kubernetes":
+			primaryAction = "Start cluster & open workstation shell"
+		}
+	}
+
 	choices := []string{
-		"Work on it (drop into shell)",
-		"Exit TUI",
+		primaryAction,
+		"Exit TUI — continue in terminal",
 	}
 
 	for i, c := range choices {
@@ -653,7 +1019,8 @@ func (m Model) viewStartConfirm() string {
 	return b.String()
 }
 
-// wordWrap word-wraps text to width chars per line.
+// wordWrap word-wraps text to at most width visual characters per line.
+// Uses utf8.RuneCountInString so multi-byte characters are measured correctly.
 func wordWrap(text string, width int) []string {
 	var lines []string
 	for _, paragraph := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
@@ -664,14 +1031,19 @@ func wordWrap(text string, width int) []string {
 		}
 		words := strings.Fields(paragraph)
 		current := ""
+		currentLen := 0
 		for _, word := range words {
+			wordLen := utf8.RuneCountInString(word)
 			if current == "" {
 				current = word
-			} else if len(current)+1+len(word) <= width {
+				currentLen = wordLen
+			} else if currentLen+1+wordLen <= width {
 				current += " " + word
+				currentLen += 1 + wordLen
 			} else {
 				lines = append(lines, current)
 				current = word
+				currentLen = wordLen
 			}
 		}
 		if current != "" {
@@ -690,6 +1062,3 @@ func syntheticTicketID(exerciseName string) string {
 	}
 	return fmt.Sprintf("TASK-%04d", h%9000+1000)
 }
-
-// lipgloss.Width is used for padding calculations; suppress unused import.
-var _ = lipgloss.Width

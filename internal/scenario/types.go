@@ -61,11 +61,59 @@ type EnvironmentSpec struct {
 }
 
 type KubernetesSpec struct {
-	CreateCluster  *bool           `yaml:"createCluster,omitempty"`
-	KindConfig     string          `yaml:"kindConfig,omitempty"`
-	Namespace      string          `yaml:"namespace,omitempty"`
-	SetupManifests []string        `yaml:"setupManifests,omitempty"`
-	WaitFor        []WaitCondition `yaml:"waitFor,omitempty"`
+	CreateCluster  *bool                `yaml:"createCluster,omitempty"`
+	Provider       string               `yaml:"provider,omitempty"`
+	KindConfig     string               `yaml:"kindConfig,omitempty"`
+	Kind           *KindProviderSpec    `yaml:"kind,omitempty"`
+	Vagrant        *VagrantProviderSpec `yaml:"vagrant,omitempty"`
+	Namespace      string               `yaml:"namespace,omitempty"`
+	SetupManifests []string             `yaml:"setupManifests,omitempty"`
+	WaitFor        []WaitCondition      `yaml:"waitFor,omitempty"`
+}
+
+type KindProviderSpec struct {
+	ClusterName string `yaml:"clusterName,omitempty"`
+	Config      string `yaml:"config,omitempty"`
+}
+
+type VagrantProviderSpec struct {
+	BootstrapMode     string                `yaml:"bootstrapMode,omitempty"`
+	Box               string                `yaml:"box,omitempty"`
+	KubernetesVersion string                `yaml:"kubernetesVersion,omitempty"`
+	PodCIDR           string                `yaml:"podCIDR,omitempty"`
+	ServiceCIDR       string                `yaml:"serviceCIDR,omitempty"`
+	CNI               string                `yaml:"cni,omitempty"`
+	SSHUser           string                `yaml:"sshUser,omitempty"`
+	Bootstrap         *bool                 `yaml:"bootstrap,omitempty"`
+	Preinstall        VagrantPreinstallSpec `yaml:"preinstall,omitempty"`
+	Topology          VagrantTopologySpec   `yaml:"topology,omitempty"`
+	Network           VagrantNetworkSpec    `yaml:"network,omitempty"`
+	Resources         VagrantResourcesSpec  `yaml:"resources,omitempty"`
+}
+
+type VagrantPreinstallSpec struct {
+	InstallContainerd         *bool `yaml:"installContainerd,omitempty"`
+	InstallKubernetesPackages *bool `yaml:"installKubernetesPackages,omitempty"`
+	ConfigureKernelNetworking *bool `yaml:"configureKernelNetworking,omitempty"`
+}
+
+type VagrantTopologySpec struct {
+	ControlPlanes int `yaml:"controlPlanes,omitempty"`
+	Workers       int `yaml:"workers,omitempty"`
+}
+
+type VagrantNetworkSpec struct {
+	PrivateCIDR string `yaml:"privateCidr,omitempty"`
+}
+
+type VagrantMachineResources struct {
+	CPUs     int `yaml:"cpus,omitempty"`
+	MemoryMB int `yaml:"memoryMb,omitempty"`
+}
+
+type VagrantResourcesSpec struct {
+	ControlPlane VagrantMachineResources `yaml:"controlPlane,omitempty"`
+	Worker       VagrantMachineResources `yaml:"worker,omitempty"`
 }
 
 type WaitCondition struct {
@@ -106,6 +154,7 @@ type Check struct {
 	Timeout        string            `yaml:"timeout,omitempty"`
 	Script         string            `yaml:"script,omitempty"`
 	Selector       string            `yaml:"selector,omitempty"`
+	Node           string            `yaml:"node,omitempty"`
 	Container      string            `yaml:"container,omitempty"`
 	Command        []string          `yaml:"command,omitempty"`
 	ExpectExitCode *int              `yaml:"expectExitCode,omitempty"`
@@ -148,10 +197,18 @@ type Reference struct {
 }
 
 type CustomSetupStep struct {
-	Type      string `yaml:"type"`
-	Script    string `yaml:"script,omitempty"`
-	Condition string `yaml:"condition,omitempty"`
-	Timeout   string `yaml:"timeout,omitempty"`
+	Type      string        `yaml:"type"`
+	Script    string        `yaml:"script,omitempty"`
+	NodeExec  *NodeExecSpec `yaml:"nodeExec,omitempty"`
+	Condition string        `yaml:"condition,omitempty"`
+	Timeout   string        `yaml:"timeout,omitempty"`
+}
+
+type NodeExecSpec struct {
+	Node    string `yaml:"node"`
+	User    string `yaml:"user,omitempty"`
+	Script  string `yaml:"script,omitempty"`
+	Timeout string `yaml:"timeout,omitempty"`
 }
 
 type Variant struct {

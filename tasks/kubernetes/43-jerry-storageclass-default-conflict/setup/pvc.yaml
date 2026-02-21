@@ -1,0 +1,12 @@
+# No storageClassName — should use the cluster default.
+# With two defaults, this PVC may stay Pending or bind unpredictably.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jerry-unqualified-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

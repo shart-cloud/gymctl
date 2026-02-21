@@ -57,12 +57,15 @@ func newStartCmd() *cobra.Command {
 				}
 
 				k8s := exercise.Spec.Environment.Kubernetes
-				createCluster := true
-				if k8s.CreateCluster != nil {
-					createCluster = *k8s.CreateCluster
+				createCluster := shouldCreateCluster(k8s, opts.noCluster)
+				provider, state, err := resolveKubernetesProviderAndState(exercise.Metadata.Name, k8s)
+				if err != nil {
+					return err
 				}
-				if opts.noCluster {
-					createCluster = false
+
+				ensureSpec := k8s
+				if !createCluster {
+					ensureSpec = withCreateCluster(k8s, false)
 				}
 				namespace := k8s.Namespace
 				if namespace == "" {
@@ -70,29 +73,45 @@ func newStartCmd() *cobra.Command {
 				}
 
 				if createCluster {
-					manager := environment.KindManager{ClusterName: "jerry-gym"}
-					exists, err := manager.Exists(ctx)
-					if err != nil {
-						return err
-					}
-					if exists {
-						err = WithSpinner("Cleaning existing kind cluster", func() error {
-							return manager.Delete(ctx)
+					if provider.Name() == environment.KubernetesProviderVagrant {
+						// Vagrant streams its own output; skip the spinner to avoid
+						// interleaved terminal writes. Vagrant up can take 5-15 minutes
+						// on Windows/macOS so live output is important.
+						fmt.Fprintln(cmd.OutOrStdout(), "Starting Vagrant VMs with VirtualBox (this may take several minutes)...")
+						err = provider.Ensure(ctx, entry.Dir, ensureSpec, state)
+					} else {
+						err = WithSpinner("Preparing kubernetes environment (this may take a minute)", func() error {
+							return provider.Ensure(ctx, entry.Dir, ensureSpec, state)
 						})
-						if err != nil {
-							return err
-						}
 					}
-					err = WithSpinner("Creating kind cluster (this may take a minute)", func() error {
-						return manager.Create(ctx, k8s.KindConfig)
-					})
+				} else {
+					err = provider.Ensure(ctx, entry.Dir, ensureSpec, state)
+				}
+				if err != nil {
+					return err
+				}
+
+				if err := environment.SaveExerciseState(state); err != nil {
+					return err
+				}
+
+				if !environment.IsBareNodeKubernetes(k8s) {
+					kubeconfigPath, err := provider.ExportKubeconfig(ctx, state, "")
 					if err != nil {
 						return err
 					}
+					if err := environment.SaveExerciseState(state); err != nil {
+						return err
+					}
+					_ = os.Setenv("KUBECONFIG", kubeconfigPath)
+				}
+
+				if environment.IsBareNodeKubernetes(k8s) {
+					ColorInfo.Fprintln(cmd.OutOrStdout(), "Vagrant bare-node mode: skipping manifest apply and wait conditions until cluster bootstrap is done.")
 				}
 
 				manifests := environment.ResolveManifestPaths(entry.Dir, k8s.SetupManifests)
-				if len(manifests) > 0 {
+				if len(manifests) > 0 && !environment.IsBareNodeKubernetes(k8s) {
 					err = WithSpinner("Applying setup manifests", func() error {
 						return environment.ApplyManifests(ctx, namespace, manifests)
 					})
@@ -101,18 +120,20 @@ func newStartCmd() *cobra.Command {
 					}
 				}
 
-				for _, wait := range k8s.WaitFor {
-					err = WithSpinner(fmt.Sprintf("Waiting for %s", wait.Resource), func() error {
-						return environment.WaitForCondition(ctx, namespace, wait.Resource, wait.Condition, wait.Timeout)
-					})
-					if err != nil {
-						return err
+				if !environment.IsBareNodeKubernetes(k8s) {
+					for _, wait := range k8s.WaitFor {
+						err = WithSpinner(fmt.Sprintf("Waiting for %s", wait.Resource), func() error {
+							return environment.WaitForCondition(ctx, namespace, wait.Resource, wait.Condition, wait.Timeout)
+						})
+						if err != nil {
+							return err
+						}
 					}
 				}
 
 				if len(exercise.Spec.Environment.CustomSetup) > 0 {
 					err = WithSpinner("Running custom setup steps", func() error {
-						return environment.RunCustomSetup(ctx, entry.Dir, exercise.Spec.Environment.CustomSetup)
+						return environment.RunCustomSetup(ctx, entry.Dir, exercise, exercise.Spec.Environment.CustomSetup)
 					})
 					if err != nil {
 						return err
@@ -189,7 +210,7 @@ func newStartCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&opts.noCluster, "no-cluster", false, "Skip kind cluster creation")
+	cmd.Flags().BoolVar(&opts.noCluster, "no-cluster", false, "Skip kubernetes cluster creation")
 
 	return cmd
 }

@@ -1,0 +1,100 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-subpath-mount-breaks-symlink
+  title: "Jerry's Config Update Isn't Reaching the Container"
+  track: k8s-storage
+  week: 5
+  order: 11
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 140
+
+  description: |
+    Jerry updated a ConfigMap to change his app's database host. The ConfigMap
+    shows the new value. But the running container still reads the old value.
+
+    The pod was not restarted. The container's config file looks correct when
+    inspected from outside, but exec into the pod shows the stale value.
+
+    Diagnose why the update isn't propagating and fix the mount so the
+    container picks up the current ConfigMap value.
+
+  learningOutcomes:
+    - "Understand that subPath mounts do not receive live ConfigMap updates"
+    - "Diagnose the stale-config symptom and trace it to subPath"
+    - "Fix by removing subPath (for live updates) or restarting the pod (one-time fix)"
+
+  tags:
+    - storage
+    - configmap
+    - subpath
+    - volumes
+    - troubleshooting
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/configmap.yaml
+        - setup/pod.yaml
+    customSetup:
+      - type: script
+        timeout: 90s
+        script: |
+          set -e
+          for i in $(seq 1 60); do
+            phase=$(kubectl get pod jerry-config-app -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            if [ "$phase" = "Running" ]; then break; fi
+            sleep 2
+          done
+          kubectl patch configmap jerry-app-config --type=merge \
+            -p '{"data":{"db-host":"postgres-v2.prod.svc.cluster.local"}}'
+
+  checks:
+    - name: "ConfigMap has the updated value"
+      type: script
+      script: |
+        set -e
+        val=$(kubectl get configmap jerry-app-config -o jsonpath='{.data.db-host}')
+        if [ "$val" = "postgres-v2.prod.svc.cluster.local" ]; then exit 0; fi
+        echo "FAIL: ConfigMap db-host is '$val'"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Container reads the updated config value"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 30); do
+          phase=$(kubectl get pod jerry-config-app -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [ "$phase" = "Running" ]; then break; fi
+          sleep 2
+        done
+        val=$(kubectl exec jerry-config-app -- cat /etc/app/db-host 2>/dev/null || true)
+        if [ "$val" = "postgres-v2.prod.svc.cluster.local" ]; then exit 0; fi
+        echo "FAIL: container reads '$val', expected 'postgres-v2.prod.svc.cluster.local'"
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Container now reads the updated ConfigMap value.
+
+    **Key takeaway:** subPath mounts are a static copy pinned at pod creation —
+    they do not receive live updates when the underlying ConfigMap changes.
+    Without subPath, the entire volume mount refreshes when the ConfigMap is
+    updated (within the kubelet sync period, ~60s). With subPath, you must
+    restart the pod to pick up changes.

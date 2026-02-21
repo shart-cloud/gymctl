@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jerry-migration-config
+  namespace: default
+data:
+  migration_sql: |
+    CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT);
+    INSERT INTO users (name) VALUES ('seed');
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-init-app
+  labels:
+    app: jerry-init-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-init-app
+  template:
+    metadata:
+      labels:
+        app: jerry-init-app
+    spec:
+      initContainers:
+      - name: db-migration
+        image: busybox:1.36
+        command:
+          - sh
+          - -c
+          - |
+            echo "Running DB migration..."
+            if [ -z "$DB_MIGRATION_SCRIPT" ]; then
+              echo "ERROR: DB_MIGRATION_SCRIPT is empty — migration script not found in config"
+              exit 1
+            fi
+            echo "Migration SQL: $DB_MIGRATION_SCRIPT"
+            echo "Migration complete."
+        env:
+        - name: DB_MIGRATION_SCRIPT
+          valueFrom:
+            configMapKeyRef:
+              name: jerry-migration-config
+              key: migration_script   # BUG: ConfigMap key is migration_sql, not migration_script
+              optional: true
+      containers:
+      - name: app
+        image: registry.k8s.io/pause:3.10

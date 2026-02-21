@@ -2,7 +2,7 @@
 
 **Jerry's Gym** — a hands-on training platform for Docker and Kubernetes skills.
 
-Each exercise drops you into a broken environment. Jerry made a mess. You fix it. `gymctl` sets up the environment, validates your solution, and tracks your score across 39 exercises.
+Each exercise drops you into a broken environment. Jerry made a mess. You fix it. `gymctl` sets up the environment, validates your solution, and tracks your score across 49 exercises.
 
 ---
 
@@ -54,6 +54,8 @@ Requires Go 1.24+.
 ---
 
 ## Quick Start
+
+![gymctl demo](demo-simple.gif)
 
 ```bash
 # See all available exercises
@@ -180,12 +182,22 @@ RBAC, etcd, static pods, PSA, scheduling, kubeconfig.
 
 ### Kubernetes Storage (`k8s-storage`)
 
-PVCs, StorageClasses, and reclaim policies.
+PVCs, StorageClasses, StatefulSets, PV lifecycle, and volume types.
 
 | # | Exercise | Title | Difficulty |
 |---|---|---|---|
 | 1 | `jerry-pvc-pending-storageclass` | Jerry's PVC Stuck Pending | intermediate |
 | 2 | `jerry-reclaim-policy-surprise` | Jerry's Reclaim Policy Surprise | advanced |
+| 3 | `jerry-volume-mount-wrong-path` | Jerry's Volume Mount Goes Nowhere | intermediate |
+| 4 | `jerry-access-mode-conflict` | Jerry's PVC Stuck on Access Mode | intermediate |
+| 5 | `jerry-statefulset-pvc-orphan` | Jerry's StatefulSet Orphaned Its PVCs | advanced |
+| 6 | `jerry-pv-released-not-available` | Jerry's Released PV Won't Rebind | advanced |
+| 7 | `jerry-ephemeral-volume-confusion` | Jerry's emptyDir Isn't Persistent | intermediate |
+| 8 | `jerry-storageclass-default-conflict` | Jerry's Cluster Has Two Default StorageClasses | intermediate |
+| 9 | `jerry-pvc-resize-stuck` | Jerry's PVC Resize Is Rejected | intermediate |
+| 10 | `jerry-subpath-mount-breaks-symlink` | Jerry's Config Update Isn't Reaching the Container | advanced |
+| 11 | `jerry-projected-volume-misconfigured` | Jerry's Projected Volume Won't Mount | advanced |
+| 12 | `jerry-node-local-pv-affinity-broken` | Jerry's Local PV Is Stuck on a Cordoned Node | advanced |
 
 ---
 
@@ -300,3 +312,21 @@ docker run -it --rm \
 ```
 
 Includes: kubectl, helm, kind, kubectx/kubens, docker CLI, jq, yq, vim, zsh with aliases (`k`, `kgp`, `kgs`, `kgd`).
+
+---
+
+## Demo Recordings
+
+This repository includes VHS tape files for creating terminal demonstrations:
+
+- `demo-simple.tape` - Basic help and list commands demo
+- `demo-quickstart.tape` - Full quick start workflow
+- `demo-tui.tape` - Interactive TUI demonstration
+- `demo-workflow.tape` - Complete exercise workflow
+- `demo-list.tape` - Exercise browsing and filtering
+
+To regenerate the recordings (requires [VHS](https://github.com/charmbracelet/vhs)):
+
+```bash
+vhs demo-simple.tape
+```
