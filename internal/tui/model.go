@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"gymctl/internal/environment"
 	"gymctl/internal/progress"
@@ -214,7 +214,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
 	case startDoneMsg:
@@ -278,7 +278,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	switch m.view {
@@ -572,22 +572,25 @@ func (m Model) renderEnvironmentPanel(ex *scenario.Exercise) string {
 }
 
 // View implements tea.Model.
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	var content string
 	switch m.view {
 	case viewHome:
-		return m.viewHome()
+		content = m.viewHome()
 	case viewTrackSelect:
-		return m.viewTrackSelect()
+		content = m.viewTrackSelect()
 	case viewExerciseList:
-		return m.viewExerciseList()
+		content = m.viewExerciseList()
 	case viewExerciseDetail:
-		return m.viewExerciseDetail()
+		content = m.viewExerciseDetail()
 	case viewHintPeek:
-		return m.viewHintPeek()
+		content = m.viewHintPeek()
 	case viewStartConfirm:
-		return m.viewStartConfirm()
+		content = m.viewStartConfirm()
 	}
-	return ""
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 func (m Model) viewHome() string {

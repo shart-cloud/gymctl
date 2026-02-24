@@ -63,7 +63,16 @@ func checkVagrantDeps() error {
 }
 
 func (p *VagrantProvider) Ensure(ctx context.Context, entryDir string, spec *scenario.KubernetesSpec, state *ExerciseState) error {
-	if err := checkVagrantDeps(); err != nil {
+	var providerSpec *scenario.VagrantProviderSpec
+	if spec != nil {
+		providerSpec = spec.Vagrant
+	}
+
+	backend, err := ResolveVagrantBackend(providerSpec)
+	if err != nil {
+		return err
+	}
+	if err := ValidateBackend(backend); err != nil {
 		return err
 	}
 
@@ -96,7 +105,7 @@ func (p *VagrantProvider) Ensure(ctx context.Context, entryDir string, spec *sce
 		return fmt.Errorf("create vagrant workspace: %w", err)
 	}
 
-	vagrantfile := buildVagrantfile(spec, machines)
+	vagrantfile := buildVagrantfile(spec, machines, backend)
 	vagrantfilePath := filepath.Join(workspace, "Vagrantfile")
 	if err := os.WriteFile(vagrantfilePath, []byte(vagrantfile), 0o644); err != nil {
 		return fmt.Errorf("write Vagrantfile: %w", err)
@@ -106,7 +115,7 @@ func (p *VagrantProvider) Ensure(ctx context.Context, entryDir string, spec *sce
 		return nil
 	}
 
-	if err := runner.RunStreamingInDir(ctx, workspace, "vagrant", "up"); err != nil {
+	if err := runner.RunStreamingInDir(ctx, workspace, "vagrant", "up", "--provider", string(backend)); err != nil {
 		return err
 	}
 

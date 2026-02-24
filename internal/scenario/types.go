@@ -77,6 +77,7 @@ type KindProviderSpec struct {
 }
 
 type VagrantProviderSpec struct {
+	Backend           string                `yaml:"backend,omitempty"`
 	BootstrapMode     string                `yaml:"bootstrapMode,omitempty"`
 	Box               string                `yaml:"box,omitempty"`
 	KubernetesVersion string                `yaml:"kubernetesVersion,omitempty"`

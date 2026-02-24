@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"gymctl/internal/environment"
@@ -43,7 +43,7 @@ or directly exec into the workstation container if --workstation is used.`,
 			}
 
 			m := tui.NewModel(catalog, prog, tasksDir, progressPath)
-			p := tea.NewProgram(m, tea.WithAltScreen())
+			p := tea.NewProgram(m)
 			_, err = p.Run()
 			return err
 		},
