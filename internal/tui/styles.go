@@ -278,3 +278,176 @@ func centerText(s string, width int) string {
 	right := total - left
 	return strings.Repeat(" ", left) + s + strings.Repeat(" ", right)
 }
+
+func applyTheme(isDark bool) {
+	if isDark {
+		ColorBrand = lipgloss.Color("#56D4E6")
+		ColorSecondary = lipgloss.Color("#F6C177")
+		ColorAccent = lipgloss.Color("#9CCFD8")
+		ColorSuccess = lipgloss.Color("#8BD49C")
+		ColorWarning = lipgloss.Color("#F2AE49")
+		ColorError = lipgloss.Color("#E26D5C")
+		ColorText = lipgloss.Color("#E8E6E3")
+		ColorTextDim = lipgloss.Color("#7F7B77")
+		ColorBg = lipgloss.Color("#12161B")
+		ColorBgSecond = lipgloss.Color("#1B222A")
+	} else {
+		ColorBrand = lipgloss.Color("#00778B")
+		ColorSecondary = lipgloss.Color("#9C4D00")
+		ColorAccent = lipgloss.Color("#0C8E8A")
+		ColorSuccess = lipgloss.Color("#53A66C")
+		ColorWarning = lipgloss.Color("#D68E2B")
+		ColorError = lipgloss.Color("#B2473B")
+		ColorText = lipgloss.Color("#20242B")
+		ColorTextDim = lipgloss.Color("#6F7480")
+		ColorBg = lipgloss.Color("#F4F7FA")
+		ColorBgSecond = lipgloss.Color("#E8EEF4")
+	}
+
+	StyleHeader = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorBrand).
+		Background(ColorBg)
+
+	StyleTrack = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorBrand).
+		Background(ColorBgSecond).
+		Padding(0, 1).
+		MarginBottom(1)
+
+	StyleSuccess = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#000")).
+		Background(ColorSuccess).
+		Padding(0, 1)
+
+	StyleWarning = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#000")).
+		Background(ColorWarning).
+		Padding(0, 1)
+
+	StyleError = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFF")).
+		Background(ColorError).
+		Padding(0, 1)
+
+	StyleDim = lipgloss.NewStyle().
+		Foreground(ColorTextDim)
+
+	StyleP0 = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFF")).
+		Background(ColorError).
+		Padding(0, 1)
+
+	StyleP1 = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#000")).
+		Background(ColorWarning).
+		Padding(0, 1)
+
+	StyleP2 = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#000")).
+		Background(ColorAccent).
+		Padding(0, 1)
+
+	StyleP3 = lipgloss.NewStyle().
+		Foreground(ColorTextDim).
+		Background(ColorBgSecond).
+		Padding(0, 1)
+
+	StyleSelected = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorBg).
+		Background(ColorSecondary).
+		Padding(0, 1)
+
+	StyleBox = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorSecondary).
+		Background(ColorBgSecond).
+		Padding(1, 2)
+
+	StyleTicketBox = lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(ColorBrand).
+		Background(ColorBg).
+		Padding(1, 2).
+		MarginBottom(1)
+
+	StyleTicketBorder = lipgloss.NewStyle().
+		Foreground(ColorBrand)
+
+	StyleBody = lipgloss.NewStyle().
+		Foreground(ColorText)
+
+	StyleKey = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorBrand).
+		Background(ColorBgSecond).
+		Padding(0, 1)
+
+	StyleFooter = lipgloss.NewStyle().
+		Foreground(ColorTextDim)
+
+	StyleEasy = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#000")).
+		Background(ColorSuccess).
+		Padding(0, 1)
+
+	StyleMedium = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#000")).
+		Background(ColorWarning).
+		Padding(0, 1)
+
+	StyleHard = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFF")).
+		Background(ColorError).
+		Padding(0, 1)
+
+	StyleSectionTitle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorSecondary).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderBottom(true).
+		BorderForeground(ColorAccent).
+		MarginBottom(1)
+
+	StyleBarFill = lipgloss.NewStyle().
+		Foreground(ColorSuccess).
+		Background(ColorBgSecond)
+
+	StyleBarEmpty = lipgloss.NewStyle().
+		Foreground(ColorTextDim).
+		Background(ColorBg)
+
+	StyleBadge = lipgloss.NewStyle().
+		Bold(true).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder())
+
+	StyleCard = lipgloss.NewStyle().
+		Background(ColorBgSecond).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBrand).
+		Padding(1, 2).
+		MarginBottom(1)
+
+	StyleCardTitle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorSecondary)
+
+	StyleCardBody = lipgloss.NewStyle().
+		Foreground(ColorText)
+
+	StyleHighlight = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorAccent)
+}
