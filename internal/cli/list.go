@@ -39,6 +39,94 @@ func newListCmd() *cobra.Command {
 			}
 
 			filtered := filterList(entries, opts)
+
+			if isJSONOutput() {
+				type listExerciseJSON struct {
+					Name           string   `json:"name"`
+					Title          string   `json:"title"`
+					Track          string   `json:"track"`
+					Week           int      `json:"week"`
+					Order          int      `json:"order"`
+					Difficulty     string   `json:"difficulty"`
+					EstimatedTime  string   `json:"estimatedTime"`
+					Points         int      `json:"points"`
+					Status         string   `json:"status"`
+					Score          int      `json:"score"`
+					Tags           []string `json:"tags"`
+					Locked         bool     `json:"locked"`
+					MissingPrereqs []string `json:"missingPrereqs"`
+				}
+				type listSummaryJSON struct {
+					Total        int `json:"total"`
+					Completed    int `json:"completed"`
+					InProgress   int `json:"inProgress"`
+					NotStarted   int `json:"notStarted"`
+					TotalPoints  int `json:"totalPoints"`
+					EarnedPoints int `json:"earnedPoints"`
+				}
+				type listResponseJSON struct {
+					Exercises []listExerciseJSON `json:"exercises"`
+					Summary   listSummaryJSON    `json:"summary"`
+				}
+
+				sort.Slice(filtered, func(i, j int) bool {
+					ai := filtered[i].Exercise
+					aj := filtered[j].Exercise
+					if ai.Metadata.Track != aj.Metadata.Track {
+						return ai.Metadata.Track < aj.Metadata.Track
+					}
+					if ai.Metadata.Week != aj.Metadata.Week {
+						return ai.Metadata.Week < aj.Metadata.Week
+					}
+					if ai.Metadata.Order != aj.Metadata.Order {
+						return ai.Metadata.Order < aj.Metadata.Order
+					}
+					return ai.Metadata.Name < aj.Metadata.Name
+				})
+
+				response := listResponseJSON{Exercises: make([]listExerciseJSON, 0, len(filtered))}
+				for _, entry := range filtered {
+					exercise := entry.Exercise
+					st := progressFile.Exercises[exercise.Metadata.Name]
+					locked, missingPrereqs := isExerciseLocked(exercise, progressFile)
+
+					status := jsonStatus(st.Status)
+					if locked {
+						status = "not-started"
+					}
+
+					response.Exercises = append(response.Exercises, listExerciseJSON{
+						Name:           exercise.Metadata.Name,
+						Title:          exercise.Metadata.Title,
+						Track:          exercise.Metadata.Track,
+						Week:           exercise.Metadata.Week,
+						Order:          exercise.Metadata.Order,
+						Difficulty:     exercise.Spec.Difficulty,
+						EstimatedTime:  exercise.Spec.EstimatedTime,
+						Points:         defaultPoints(exercise.Spec.Points),
+						Status:         status,
+						Score:          st.Score,
+						Tags:           exercise.Spec.Tags,
+						Locked:         locked,
+						MissingPrereqs: missingPrereqs,
+					})
+
+					response.Summary.Total++
+					response.Summary.TotalPoints += defaultPoints(exercise.Spec.Points)
+					response.Summary.EarnedPoints += st.Score
+					switch status {
+					case "completed":
+						response.Summary.Completed++
+					case "in-progress":
+						response.Summary.InProgress++
+					default:
+						response.Summary.NotStarted++
+					}
+				}
+
+				return writeJSON(cmd.OutOrStdout(), response)
+			}
+
 			if len(filtered) == 0 {
 				ColorWarning.Fprintln(cmd.OutOrStdout(), "No exercises found.")
 				return nil

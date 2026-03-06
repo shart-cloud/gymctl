@@ -1,0 +1,127 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-vpa-recommendation-ignored
+  title: "Jerry's VPA Exists But Does Nothing"
+  track: k8s-autoscaling
+  week: 7
+  order: 1
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 120
+
+  description: |
+    Jerry created a VPA for his deployment, saw the object exist in the cluster,
+    and declared the problem solved. The deployment's pods still have the original
+    over-provisioned requests hardcoded. No recommendations are visible.
+
+    The VPA isn't producing recommendations because the metrics pipeline it
+    depends on isn't running.
+
+    Fix the VPA pipeline so recommendations are generated, then read the
+    Target recommendation and manually apply it to the deployment.
+
+  learningOutcomes:
+    - "Understand that VPA requires metrics-server to produce recommendations"
+    - "Read VPA recommendation output from kubectl describe"
+    - "Apply VPA Target recommendations manually to a deployment"
+
+  tags:
+    - autoscaling
+    - vpa
+    - metrics-server
+    - workloads
+    - cka
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/deployment.yaml
+        - setup/vpa.yaml
+      waitFor:
+        - resource: deployment/jerry-app
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "metrics-server is running"
+      type: script
+      script: |
+        set -e
+        kubectl -n kube-system rollout status deployment/metrics-server --timeout=30s >/dev/null 2>&1
+      expectExitCode: 0
+
+    - name: "VPA has a recommendation"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 24); do
+          rec=$(kubectl get vpa jerry-app-vpa -o jsonpath='{.status.recommendation}' 2>/dev/null || true)
+          if [ -n "$rec" ] && [ "$rec" != "{}" ]; then exit 0; fi
+          sleep 10
+        done
+        echo "FAIL: VPA has no recommendation after 4 minutes"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Deployment requests are below original over-provisioned values"
+      type: script
+      script: |
+        set -e
+        # Original requests were cpu: 800m, memory: 512Mi
+        # Any lower value means the student applied the recommendation
+        cpu=$(kubectl get deployment jerry-app \
+          -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}' 2>/dev/null || true)
+        mem=$(kubectl get deployment jerry-app \
+          -o jsonpath='{.spec.template.spec.containers[0].resources.requests.memory}' 2>/dev/null || true)
+
+        cpu_m=$(echo "$cpu" | sed 's/m//' | grep -E '^[0-9]+$' || echo "9999")
+        [ "$cpu_m" -lt 800 ] || { echo "FAIL: CPU request $cpu is not below original 800m"; exit 1; }
+        echo "PASS: CPU requests right-sized to $cpu"
+      expectExitCode: 0
+
+    - name: "Deployment is Available after update"
+      type: condition
+      resource: deployment/jerry-app
+      condition: Available
+      status: "True"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    VPA recommendations flowing and applied.
+
+    **Key takeaway:** VPA is an observer — it needs metrics-server to calculate
+    recommendations. In Off mode it never touches your pods; you manually apply
+    what it suggests. Check recommendations with:
+      kubectl describe vpa <name>
+    Look for the Status.Recommendation.containerRecommendations section.
+
+  tasking:
+    ticket: "OPS-3301"
+    priority: "P2"
+    summary: "VPA created but not producing recommendations, requests unchanged"
+    description: |
+      Jerry said "I added VPA, we're good." The VPA object exists. Zero
+      recommendations have been produced. The deployment still requests 800m CPU
+      and 512Mi memory for a pod that actually uses about 60m and 40Mi at peak.
+      We're wasting resources cluster-wide. Fix the pipeline and right-size the requests.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "i applied the vpa yaml, it shows up in kubectl get vpa, what more do you want"
+    onCheckFail: "the vpa status section is empty but the object exists so it's working"
+    onHintUsed: "wait, vpa needs something else running to do its job?"
+    onComplete: "so the recommendation was 60m, not 800m. we've been wasting that for three months."

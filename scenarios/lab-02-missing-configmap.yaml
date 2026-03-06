@@ -1,0 +1,113 @@
+meta:
+  id: lab-02-missing-configmap
+  title: "Missing ConfigMap"
+  difficulty: beginner
+  time_limit_minutes: 30
+
+# A Deployment in the staging namespace is stuck because it references a
+# ConfigMap that doesn't exist. The student must identify the broken
+# Deployment, the missing ConfigMap, and the namespace.
+resources:
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: staging
+
+  # The api-config ConfigMap is intentionally absent — that's the bug.
+
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: api-server
+      namespace: staging
+    spec:
+      replicas: 2
+      selector:
+        matchLabels:
+          app: api-server
+      template:
+        metadata:
+          labels:
+            app: api-server
+        spec:
+          containers:
+            - name: api
+              image: node:20-alpine
+              envFrom:
+                - configMapRef:
+                    name: api-config
+    status:
+      replicas: 2
+      readyReplicas: 0
+      unavailableReplicas: 2
+      conditions:
+        - type: Available
+          status: "False"
+          reason: MinimumReplicasUnavailable
+          message: "Deployment does not have minimum availability."
+
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: api-server-6d8f9b-xk2pq
+      namespace: staging
+      labels:
+        app: api-server
+    spec:
+      containers:
+        - name: api
+          image: node:20-alpine
+          envFrom:
+            - configMapRef:
+                name: api-config
+    status:
+      phase: Pending
+      containerStatuses:
+        - name: api
+          ready: false
+          restartCount: 0
+          state:
+            waiting:
+              reason: CreateContainerConfigError
+              message: "configmap \"api-config\" not found"
+
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: api-server-6d8f9b-m7nws
+      namespace: staging
+      labels:
+        app: api-server
+    spec:
+      containers:
+        - name: api
+          image: node:20-alpine
+          envFrom:
+            - configMapRef:
+                name: api-config
+    status:
+      phase: Pending
+      containerStatuses:
+        - name: api
+          ready: false
+          restartCount: 0
+          state:
+            waiting:
+              reason: CreateContainerConfigError
+              message: "configmap \"api-config\" not found"
+
+checks:
+  - id: identify-deployment
+    type: exact_match
+    prompt: "What is the name of the Deployment that cannot start?"
+    expected: "api-server"
+
+  - id: identify-missing-configmap
+    type: exact_match
+    prompt: "What is the name of the missing ConfigMap?"
+    expected: "api-config"
+
+  - id: identify-namespace
+    type: exact_match
+    prompt: "Which namespace is the broken Deployment in?"
+    expected: "staging"

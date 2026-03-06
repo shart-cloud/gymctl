@@ -17,6 +17,7 @@ import (
 type checkOptions struct {
 	verbose   bool
 	noCleanup bool
+	spec      string
 }
 
 func newCheckCmd() *cobra.Command {
@@ -28,56 +29,70 @@ func newCheckCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer RecoverFromPanic(cmd)
 
-			name := ""
-			if len(args) == 1 {
-				name = args[0]
-			} else {
-				current, err := loadCurrentExercise()
-				if err != nil {
-					return WrapErrorWithHint(
-						fmt.Errorf("no exercise specified and no current exercise set"),
-						"Start an exercise first or specify one",
-						"gymctl start <exercise-name>",
-					)
-				}
-				name = current
+			if opts.spec != "" && len(args) > 0 {
+				return fmt.Errorf("cannot use exercise name argument with --spec")
 			}
 
-			entries, err := scenario.LoadCatalog(tasksDir)
-			if err != nil {
-				return err
-			}
-			entry, found := scenario.FindByName(entries, name)
-			if !found {
-				return fmt.Errorf("exercise not found: %s", name)
+			var exercise *scenario.Exercise
+			if opts.spec != "" {
+				loaded, err := scenario.LoadExerciseFile(opts.spec)
+				if err != nil {
+					return err
+				}
+				exercise = loaded
+			} else {
+				name := ""
+				if len(args) == 1 {
+					name = args[0]
+				} else {
+					current, err := loadCurrentExercise()
+					if err != nil {
+						return WrapErrorWithHint(
+							fmt.Errorf("no exercise specified and no current exercise set"),
+							"Start an exercise first or specify one",
+							"gymctl start <exercise-name>",
+						)
+					}
+					name = current
+				}
+
+				entries, err := scenario.LoadCatalog(tasksDir)
+				if err != nil {
+					return err
+				}
+				entry, found := scenario.FindByName(entries, name)
+				if !found {
+					return fmt.Errorf("exercise not found: %s", name)
+				}
+				exercise = entry.Exercise
 			}
 
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			if err := configureExerciseKubeconfigEnv(ctx, entry.Exercise); err != nil {
+			if err := configureExerciseKubeconfigEnv(ctx, exercise); err != nil {
 				return err
 			}
 
 			workDir := ""
-			if entry.Exercise.Spec.Environment.Type == "docker" {
-				resolved, err := resolveWorkDir(entry.Exercise.Metadata.Name)
+			if exercise.Spec.Environment.Type == "docker" {
+				resolved, err := resolveWorkDir(exercise.Metadata.Name)
 				if err != nil {
 					return err
 				}
 				workDir = resolved
 			}
-			// Show checking header
-			ColorInfo.Fprintf(cmd.OutOrStdout(), "🔍 Checking: %s\n", entry.Exercise.Metadata.Name)
-			if entry.Exercise.Spec.Environment.Kubernetes != nil && environment.IsBareNodeKubernetes(entry.Exercise.Spec.Environment.Kubernetes) {
-				ColorDim.Fprintln(cmd.OutOrStdout(), "  bare-node mode: nodeExec checks can run before kubeadm bootstrap completes")
+			if !isJSONOutput() {
+				ColorInfo.Fprintf(cmd.OutOrStdout(), "🔍 Checking: %s\n", exercise.Metadata.Name)
+				if exercise.Spec.Environment.Kubernetes != nil && environment.IsBareNodeKubernetes(exercise.Spec.Environment.Kubernetes) {
+					ColorDim.Fprintln(cmd.OutOrStdout(), "  bare-node mode: nodeExec checks can run before kubeadm bootstrap completes")
+				}
+				fmt.Fprintln(cmd.OutOrStdout())
 			}
-			fmt.Fprintln(cmd.OutOrStdout())
 
-			results, allPassed := checks.RunExerciseChecks(ctx, entry.Exercise, workDir)
+			results, allPassed := checks.RunExerciseChecks(ctx, exercise, workDir)
 
-			// Count passed checks
 			passedCount := 0
 			for _, result := range results {
 				if result.Passed {
@@ -85,12 +100,69 @@ func newCheckCmd() *cobra.Command {
 				}
 			}
 
-			// Show progress bar
+			if isJSONOutput() {
+				type checkResultJSON struct {
+					Name    string `json:"name"`
+					Passed  bool   `json:"passed"`
+					Message string `json:"message"`
+				}
+				type checkResponseJSON struct {
+					Exercise        string            `json:"exercise"`
+					AllPassed       bool              `json:"allPassed"`
+					PassedCount     int               `json:"passedCount"`
+					TotalCount      int               `json:"totalCount"`
+					Score           int               `json:"score"`
+					PointsAvailable int               `json:"pointsAvailable"`
+					Checks          []checkResultJSON `json:"checks"`
+				}
+
+				jsonChecks := make([]checkResultJSON, 0, len(results))
+				for _, result := range results {
+					jsonChecks = append(jsonChecks, checkResultJSON{
+						Name:    result.Name,
+						Passed:  result.Passed,
+						Message: result.Message,
+					})
+				}
+
+				score := 0
+				if allPassed {
+					if err := markCompleted(exercise); err != nil {
+						return err
+					}
+					resolvedProgressPath, err := resolveProgressFile()
+					if err != nil {
+						return err
+					}
+					progressData, err := progress.Load(resolvedProgressPath)
+					if err != nil {
+						return err
+					}
+					score = progressData.Exercises[exercise.Metadata.Name].Score
+				}
+
+				response := checkResponseJSON{
+					Exercise:        exercise.Metadata.Name,
+					AllPassed:       allPassed,
+					PassedCount:     passedCount,
+					TotalCount:      len(results),
+					Score:           score,
+					PointsAvailable: defaultPoints(exercise.Spec.Points),
+					Checks:          jsonChecks,
+				}
+				if err := writeJSON(cmd.OutOrStdout(), response); err != nil {
+					return err
+				}
+				if !allPassed {
+					return fmt.Errorf("checks failed")
+				}
+				return nil
+			}
+
 			progressBar := ProgressBar(passedCount, len(results), 20)
 			fmt.Fprintln(cmd.OutOrStdout(), progressBar)
 			fmt.Fprintln(cmd.OutOrStdout())
 
-			// Show individual check results
 			for _, result := range results {
 				checkLine := FormatCheckResult(result.Name, result.Passed, "")
 				if opts.verbose && result.Message != "" {
@@ -102,10 +174,10 @@ func newCheckCmd() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout())
 
 			if allPassed {
-				if err := markCompleted(entry.Exercise); err != nil {
+				if err := markCompleted(exercise); err != nil {
 					return err
 				}
-				dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(entry.Exercise.Spec.JerryDialog, "onComplete", entry.Exercise.Metadata.Name))
+				dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(exercise.Spec.JerryDialog, "onComplete", exercise.Metadata.Name))
 				fmt.Fprintln(cmd.OutOrStdout())
 				ColorSuccess.Fprintln(cmd.OutOrStdout(), "🎉 Exercise complete! Well done!")
 
@@ -117,15 +189,15 @@ func newCheckCmd() *cobra.Command {
 						CleanImages:     true,
 						CleanContainers: true,
 						CleanVolumes:    true,
-						Exercise:        entry.Exercise.Metadata.Name,
+						Exercise:        exercise.Metadata.Name,
 					}
-					CleanupHook(cmd, entry.Exercise, cleanupConfig)
+					CleanupHook(cmd, exercise, cleanupConfig)
 				}
 
 				return nil
 			}
 
-			dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(entry.Exercise.Spec.JerryDialog, "onCheckFail", entry.Exercise.Metadata.Name))
+			dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(exercise.Spec.JerryDialog, "onCheckFail", exercise.Metadata.Name))
 			fmt.Fprintln(cmd.OutOrStdout())
 			ColorWarning.Fprintf(cmd.OutOrStdout(), "⚠ Exercise not complete. %d/%d checks passed.\n", passedCount, len(results))
 			if !opts.verbose {
@@ -137,6 +209,7 @@ func newCheckCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&opts.verbose, "verbose", false, "Show check details")
 	cmd.Flags().BoolVar(&opts.noCleanup, "no-cleanup", false, "Skip cleanup after successful check")
+	cmd.Flags().StringVar(&opts.spec, "spec", "", "Path to an exercise spec file")
 
 	return cmd
 }

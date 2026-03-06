@@ -1,0 +1,103 @@
+{
+  "name": "gymctl-lab-companion",
+  "displayName": "Lab Companion",
+  "description": "VS Code sidebar for gymctl labs",
+  "version": "0.0.1",
+  "publisher": "shart-cloud",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:gymctl-lab-companion.labView",
+    "onCommand:gymctl.runChecks",
+    "onCommand:gymctl.refresh",
+    "onCommand:gymctl.openTerminal",
+    "onCommand:gymctl.nextHint",
+    "onCommand:gymctl.setActive"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewContainers": {
+      "activitybar": [
+        {
+          "id": "gymctl-lab-companion",
+          "title": "Lab Companion",
+          "icon": "media/beaker.svg"
+        }
+      ]
+    },
+    "views": {
+      "gymctl-lab-companion": [
+        {
+          "id": "gymctl-lab-companion.labView",
+          "name": "Lab Companion"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "gymctl.runChecks",
+        "title": "Run Checks"
+      },
+      {
+        "command": "gymctl.nextHint",
+        "title": "Next Hint"
+      },
+      {
+        "command": "gymctl.setActive",
+        "title": "Set Active Exercise"
+      },
+      {
+        "command": "gymctl.refresh",
+        "title": "Refresh"
+      },
+      {
+        "command": "gymctl.openTerminal",
+        "title": "Open Terminal"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "gymctl.refresh",
+          "when": "view == gymctl-lab-companion.labView",
+          "group": "navigation"
+        },
+        {
+          "command": "gymctl.runChecks",
+          "when": "view == gymctl-lab-companion.labView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gymctl.nextHint",
+          "when": "view == gymctl-lab-companion.labView",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "gymctl.setActive",
+          "when": "view == gymctl-lab-companion.labView && viewItem == exercise"
+        },
+        {
+          "command": "gymctl.runChecks",
+          "when": "view == gymctl-lab-companion.labView && viewItem == exercise"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.7.1",
+    "typescript": "^5.5.0"
+  }
+}

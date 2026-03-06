@@ -44,8 +44,7 @@ jobs:
           mkdir -p dist
           EXT=""
           if [ "${GOOS}" = "windows" ]; then EXT=".exe"; fi
-          OUT="dist/gymctl-${GOOS}-${GOARCH}${EXT}"
-          go build -o "${OUT}" ./cmd/gymctl
+          go build -o "dist/gymctl-${GOOS}-${GOARCH}${EXT}" ./cmd/gymctl
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

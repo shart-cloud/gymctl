@@ -1,0 +1,89 @@
+name: Publish VS Code Extension
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish-extension:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "vscode-extension/package-lock.json"
+
+      - name: Read extension metadata
+        id: meta
+        run: |
+          echo "name=$(node -p \"require('./vscode-extension/package.json').name\")" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p \"require('./vscode-extension/package.json').version\")" >> "$GITHUB_OUTPUT"
+          echo "publisher=$(node -p \"require('./vscode-extension/package.json').publisher\")" >> "$GITHUB_OUTPUT"
+
+      - name: Build VSIX
+        run: |
+          mkdir -p dist
+          npm ci --prefix vscode-extension
+          npm run compile --prefix vscode-extension
+          npx --yes @vscode/vsce package \
+            --cwd vscode-extension \
+            --out "../dist/${{ steps.meta.outputs.name }}-${{ steps.meta.outputs.version }}.vsix" \
+            --allow-missing-repository
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension-vsix
+          path: dist/*.vsix
+
+      - name: Attach VSIX to GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.vsix
+
+      - name: Set OCI package name
+        id: oci
+        run: |
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+          echo "package=ghcr.io/$owner/gymctl-vscode-extension" >> "$GITHUB_OUTPUT"
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Publish VSIX to GitHub Packages (GHCR)
+        run: |
+          file="dist/${{ steps.meta.outputs.name }}-${{ steps.meta.outputs.version }}.vsix"
+          oras push "${{ steps.oci.outputs.package }}:${{ steps.meta.outputs.version }}" \
+            --artifact-type "application/vnd.microsoft.vscode.vsix" \
+            --annotation "org.opencontainers.image.title=${{ steps.meta.outputs.name }}" \
+            --annotation "org.opencontainers.image.version=${{ steps.meta.outputs.version }}" \
+            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            "$file:application/vnd.microsoft.vscode.vsix"
+
+      - name: Publish moving latest tag
+        run: |
+          file="dist/${{ steps.meta.outputs.name }}-${{ steps.meta.outputs.version }}.vsix"
+          oras push "${{ steps.oci.outputs.package }}:latest" \
+            --artifact-type "application/vnd.microsoft.vscode.vsix" \
+            --annotation "org.opencontainers.image.title=${{ steps.meta.outputs.name }}" \
+            --annotation "org.opencontainers.image.version=${{ steps.meta.outputs.version }}" \
+            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            "$file:application/vnd.microsoft.vscode.vsix"

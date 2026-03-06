@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jerry-batch
+spec:
+  completions: 6
+  parallelism: 3
+  completionMode: NonIndexed
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo "Worker starting..."
+          # Without an index, the worker has no idea which item to process
+          # or when to stop — so it just runs forever
+          while true; do
+            echo "processing..."
+            sleep 10
+          done

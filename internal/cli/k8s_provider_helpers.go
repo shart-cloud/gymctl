@@ -3,21 +3,28 @@ package cli
 import (
 	"context"
 	"os"
+	"strings"
 
 	"gymctl/internal/environment"
 	"gymctl/internal/scenario"
 )
 
 func resolveKubernetesProviderAndState(exerciseName string, k8s *scenario.KubernetesSpec) (environment.KubernetesProvider, *environment.ExerciseState, error) {
-	provider, err := environment.ResolveKubernetesProvider(k8s)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	state, err := environment.LoadExerciseState(exerciseName)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	resolvedSpec := k8s
+	if state != nil && strings.TrimSpace(state.Provider) != "" {
+		resolvedSpec = withProviderOverride(k8s, state.Provider)
+	}
+
+	provider, err := environment.ResolveKubernetesProvider(resolvedSpec)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	if state == nil {
 		state = &environment.ExerciseState{}
 	}
@@ -43,6 +50,20 @@ func withCreateCluster(spec *scenario.KubernetesSpec, create bool) *scenario.Kub
 	}
 	cp := *spec
 	cp.CreateCluster = &create
+	return &cp
+}
+
+func withProviderOverride(spec *scenario.KubernetesSpec, provider string) *scenario.KubernetesSpec {
+	if spec == nil || strings.TrimSpace(provider) == "" {
+		return spec
+	}
+
+	cp := *spec
+	cp.Provider = strings.ToLower(strings.TrimSpace(provider))
+	if cp.Provider == environment.KubernetesProviderVagrant && cp.Vagrant == nil {
+		cp.Vagrant = &scenario.VagrantProviderSpec{}
+	}
+
 	return &cp
 }
 

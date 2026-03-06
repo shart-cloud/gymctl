@@ -1,0 +1,134 @@
+meta:
+  id: lab-03-wrong-selector
+  title: "Wrong Service Selector"
+  difficulty: intermediate
+  time_limit_minutes: 30
+
+# A Service in the default namespace has a selector that doesn't match
+# any Pod labels. Traffic cannot reach the Pods. The student must identify
+# the Service, understand why it has no endpoints, and determine the correct
+# selector value.
+resources:
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: default
+
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: payment-service
+      namespace: default
+    spec:
+      replicas: 3
+      selector:
+        matchLabels:
+          app: payment-service
+      template:
+        metadata:
+          labels:
+            app: payment-service
+        spec:
+          containers:
+            - name: payment
+              image: python:3.12-slim
+              ports:
+                - containerPort: 8080
+    status:
+      replicas: 3
+      readyReplicas: 3
+      availableReplicas: 3
+
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: payment-service-7c9d4f-bnp2x
+      namespace: default
+      labels:
+        app: payment-service
+    spec:
+      containers:
+        - name: payment
+          image: python:3.12-slim
+    status:
+      phase: Running
+      containerStatuses:
+        - name: payment
+          ready: true
+          restartCount: 0
+          state:
+            running:
+              startedAt: "2026-02-24T00:00:00Z"
+
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: payment-service-7c9d4f-r4kzl
+      namespace: default
+      labels:
+        app: payment-service
+    spec:
+      containers:
+        - name: payment
+          image: python:3.12-slim
+    status:
+      phase: Running
+      containerStatuses:
+        - name: payment
+          ready: true
+          restartCount: 0
+          state:
+            running:
+              startedAt: "2026-02-24T00:00:00Z"
+
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: payment-service-7c9d4f-wq8ts
+      namespace: default
+      labels:
+        app: payment-service
+    spec:
+      containers:
+        - name: payment
+          image: python:3.12-slim
+    status:
+      phase: Running
+      containerStatuses:
+        - name: payment
+          ready: true
+          restartCount: 0
+          state:
+            running:
+              startedAt: "2026-02-24T00:00:00Z"
+
+  # The Service selector says "app: payment" but Pods have label "app: payment-service".
+  # This means the Service has zero endpoints and no traffic reaches the Pods.
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: payment-svc
+      namespace: default
+    spec:
+      selector:
+        app: payment       # BUG: should be "payment-service"
+      ports:
+        - port: 80
+          targetPort: 8080
+      type: ClusterIP
+
+checks:
+  - id: identify-service
+    type: exact_match
+    prompt: "What is the name of the Service with the wrong selector?"
+    expected: "payment-svc"
+
+  - id: identify-correct-selector
+    type: exact_match
+    prompt: "What should the value of the 'app' selector be changed to?"
+    expected: "payment-service"
+
+  - id: identify-namespace
+    type: exact_match
+    prompt: "Which namespace is the Service in?"
+    expected: "default"

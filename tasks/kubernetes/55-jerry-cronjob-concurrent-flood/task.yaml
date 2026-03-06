@@ -1,0 +1,151 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-cronjob-concurrent-flood
+  title: "Jerry's CronJob Is Flooding the Cluster"
+  track: k8s-workloads
+  week: 4
+  order: 10
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 120
+
+  description: |
+    Jerry's nightly report CronJob takes 3 minutes to run. He set the schedule
+    to run every minute during testing and forgot to change it back. Worse,
+    the concurrencyPolicy is Allow, so each minute a new Job spawns whether
+    or not the previous one finished.
+
+    The namespace now has 30+ running pods from stacked Job runs. The node
+    is under resource pressure. Other teams are being affected.
+
+    Fix the CronJob so it cannot run concurrent instances, limit the job
+    history to a sane number, and clean up the accumulated Job pile.
+
+  learningOutcomes:
+    - "Understand CronJob concurrencyPolicy values and their effect"
+    - "Set successfulJobsHistoryLimit and failedJobsHistoryLimit"
+    - "Manually clean up accumulated Job objects left by a runaway CronJob"
+
+  tags:
+    - cronjob
+    - jobs
+    - batch
+    - concurrencypolicy
+    - troubleshooting
+    - cka
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+    customSetup:
+      - type: script
+        timeout: 120s
+        script: |
+          set -e
+
+          kubectl apply -f - <<'MANIFEST'
+          apiVersion: batch/v1
+          kind: CronJob
+          metadata:
+            name: jerry-reports
+          spec:
+            schedule: "* * * * *"
+            concurrencyPolicy: Allow
+            successfulJobsHistoryLimit: 100
+            failedJobsHistoryLimit: 100
+            jobTemplate:
+              spec:
+                template:
+                  spec:
+                    restartPolicy: Never
+                    containers:
+                    - name: report
+                      image: busybox:1.36
+                      command:
+                      - sh
+                      - -c
+                      - |
+                        echo "generating report..."
+                        sleep 180
+                        echo "done"
+          MANIFEST
+
+          # Let it run for a bit to accumulate jobs
+          sleep 70
+
+  checks:
+    - name: "concurrencyPolicy is Forbid or Replace"
+      type: script
+      script: |
+        set -e
+        policy=$(kubectl get cronjob jerry-reports \
+          -o jsonpath='{.spec.concurrencyPolicy}' 2>/dev/null || true)
+        if [ "$policy" = "Forbid" ] || [ "$policy" = "Replace" ]; then exit 0; fi
+        echo "FAIL: concurrencyPolicy is '$policy', expected Forbid or Replace"
+        exit 1
+      expectExitCode: 0
+
+    - name: "successfulJobsHistoryLimit is 3 or fewer"
+      type: script
+      script: |
+        set -e
+        limit=$(kubectl get cronjob jerry-reports \
+          -o jsonpath='{.spec.successfulJobsHistoryLimit}' 2>/dev/null || true)
+        [ -n "$limit" ] && [ "$limit" -le 3 ] || {
+          echo "FAIL: successfulJobsHistoryLimit is '$limit', expected <= 3"
+          exit 1
+        }
+      expectExitCode: 0
+
+    - name: "Fewer than 5 Jobs remain in namespace"
+      type: script
+      script: |
+        set -e
+        count=$(kubectl get jobs --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        [ "$count" -lt 5 ] || {
+          echo "FAIL: $count jobs still exist — clean up the accumulated pile"
+          exit 1
+        }
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    CronJob tamed — no more concurrent flooding.
+
+    **Key takeaway:**
+    - concurrencyPolicy: Forbid skips new runs while one is active
+    - concurrencyPolicy: Replace cancels the running job and starts fresh
+    - successfulJobsHistoryLimit and failedJobsHistoryLimit prevent job pile-up
+    - For long-running scheduled tasks, Forbid is almost always the right choice
+
+  tasking:
+    ticket: "OPS-2201"
+    priority: "P0"
+    summary: "30+ report pods running concurrently, node under pressure"
+    description: |
+      Jerry left a CronJob running every minute with Allow concurrency during
+      testing. The task takes 3 minutes. Each minute another Job spawns.
+      We now have 30+ concurrent jobs all running the same report. Node memory
+      is at 96% and other workloads are being evicted.
+
+      Fix the CronJob config and clean up the job pile immediately.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "i just set it to every minute for testing, i thought it would replace the old one"
+    onCheckFail: "the jobs are all running successfully though"
+    onHintUsed: "there's a policy for controlling whether two can run at the same time?"
+    onComplete: "Forbid. and successfulJobsHistoryLimit: 3. i will set these by default from now on."

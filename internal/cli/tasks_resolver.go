@@ -66,6 +66,10 @@ To set up exercises in your home directory:
 func setupTasksDirectory() error {
 	resolved, err := resolveTasksDirectory()
 	if err != nil {
+		if isJSONOutput() {
+			return err
+		}
+
 		// Provide instructions for setup
 		fmt.Fprintln(os.Stderr, err)
 
@@ -86,7 +90,9 @@ func setupTasksDirectory() error {
 	}
 
 	tasksDir = resolved
-	fmt.Fprintf(os.Stderr, "Using exercises from: %s\n", tasksDir)
+	if !isJSONOutput() {
+		fmt.Fprintf(os.Stderr, "Using exercises from: %s\n", tasksDir)
+	}
 	return nil
 }
 

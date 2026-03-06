@@ -1,0 +1,118 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-vpa-hpa-conflict
+  title: "Jerry Let VPA and HPA Fight Over CPU"
+  track: k8s-autoscaling
+  week: 7
+  order: 2
+
+spec:
+  difficulty: advanced
+  estimatedTime: 25m
+  points: 140
+
+  description: |
+    Jerry enabled both HPA and VPA in Auto mode on the same deployment. HPA
+    is scaling replicas based on CPU utilization percentage. VPA is simultaneously
+    changing the CPU requests the HPA's percentage is calculated against. The
+    two controllers are fighting each other: VPA lowers CPU requests, HPA sees
+    higher utilization and scales out, VPA raises requests, HPA scales in.
+
+    The deployment is thrashing — replica count oscillates and pods are being
+    evicted constantly.
+
+    Fix the conflict by reconfiguring VPA to exclude CPU from its scope,
+    leaving CPU scaling entirely to HPA.
+
+  learningOutcomes:
+    - "Understand why HPA and VPA conflict when both control CPU"
+    - "Use VPA resourcePolicy.controlledResources to limit VPA scope to memory only"
+    - "Verify stable replica counts and no VPA-driven CPU evictions after fix"
+
+  tags:
+    - autoscaling
+    - vpa
+    - hpa
+    - conflict
+    - workloads
+    - cka
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/metrics-server.yaml
+        - setup/deployment.yaml
+        - setup/hpa.yaml
+        - setup/vpa.yaml
+      waitFor:
+        - resource: deployment/jerry-app
+          condition: available
+          timeout: 180s
+
+  checks:
+    - name: "VPA controlledResources excludes CPU"
+      type: script
+      script: |
+        set -e
+        controlled=$(kubectl get vpa jerry-app-vpa \
+          -o jsonpath='{.spec.resourcePolicy.containerPolicies[0].controlledResources}' 2>/dev/null || true)
+        if echo "$controlled" | grep -q "memory" && ! echo "$controlled" | grep -q "cpu"; then
+          exit 0
+        fi
+        echo "FAIL: VPA controlledResources is '$controlled' — should contain memory but NOT cpu"
+        exit 1
+      expectExitCode: 0
+
+    - name: "HPA still exists and targets CPU"
+      type: script
+      script: |
+        set -e
+        kubectl get hpa jerry-app-hpa >/dev/null
+        metric=$(kubectl get hpa jerry-app-hpa \
+          -o jsonpath='{.spec.metrics[0].resource.name}' 2>/dev/null || true)
+        [ "$metric" = "cpu" ] || { echo "FAIL: HPA metric is '$metric', expected 'cpu'"; exit 1; }
+      expectExitCode: 0
+
+    - name: "Deployment is Available"
+      type: condition
+      resource: deployment/jerry-app
+      condition: Available
+      status: "True"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Conflict resolved — HPA owns CPU, VPA owns memory.
+
+    **Key takeaway:** HPA computes utilization as (actual CPU) / (request CPU).
+    If VPA changes request CPU, the denominator shifts and HPA makes wrong
+    scaling decisions. The fix: set VPA controlledResources to [memory] only,
+    and let HPA own CPU replica scaling without interference.
+
+  tasking:
+    ticket: "OPS-3445"
+    priority: "P1"
+    summary: "Deployment thrashing — replica count oscillating, constant pod evictions"
+    description: |
+      Production deployment has been oscillating between 2 and 9 replicas all
+      morning. Alert fatigue is high. Root cause: both VPA Auto and HPA are
+      controlling CPU on the same deployment. They are fighting each other.
+      Fix the autoscaling config so the two controllers don't conflict.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "more autoscaling is better autoscaling, i enabled both"
+    onCheckFail: "the hpa scales up and then the vpa scales down and then the hpa scales up again, seems fine"
+    onHintUsed: "they can both be on at the same time if you configure them right?"
+    onComplete: "so vpa does memory, hpa does cpu replicas. got it. i will not do both again."

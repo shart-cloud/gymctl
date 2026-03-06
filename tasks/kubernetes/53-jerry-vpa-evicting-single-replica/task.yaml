@@ -1,0 +1,117 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-vpa-evicting-single-replica
+  title: "Jerry's VPA Keeps Killing the Only Running Pod"
+  track: k8s-autoscaling
+  week: 7
+  order: 3
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 130
+
+  description: |
+    Jerry's production service has one replica. VPA is set to Auto mode.
+    Every few minutes VPA evicts the single pod to apply updated resource
+    requests. During the eviction window the service is completely down —
+    there are no other replicas to handle traffic.
+
+    The right fix is not to remove VPA, but to change the update mode so VPA
+    only applies recommendations to new pods, not to running ones.
+
+  learningOutcomes:
+    - "Understand VPA updateMode values and their disruption model"
+    - "Choose Initial mode to prevent eviction of running pods"
+    - "Recognize that Auto mode on single-replica deployments causes downtime"
+
+  tags:
+    - autoscaling
+    - vpa
+    - updatemode
+    - availability
+    - cka
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/metrics-server.yaml
+        - setup/deployment.yaml
+        - setup/vpa.yaml
+      waitFor:
+        - resource: deployment/jerry-singleton
+          condition: available
+          timeout: 120s
+
+  checks:
+    - name: "VPA updateMode is Initial (not Auto or Recreate)"
+      type: script
+      script: |
+        set -e
+        mode=$(kubectl get vpa jerry-singleton-vpa \
+          -o jsonpath='{.spec.updatePolicy.updateMode}' 2>/dev/null || true)
+        if [ "$mode" = "Initial" ]; then exit 0; fi
+        echo "FAIL: updateMode is '$mode', expected 'Initial'"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Deployment still has exactly 1 replica"
+      type: script
+      script: |
+        set -e
+        replicas=$(kubectl get deployment jerry-singleton \
+          -o jsonpath='{.spec.replicas}' 2>/dev/null || true)
+        [ "$replicas" = "1" ] || { echo "FAIL: replicas is '$replicas', expected '1'"; exit 1; }
+      expectExitCode: 0
+
+    - name: "Deployment is Available"
+      type: condition
+      resource: deployment/jerry-singleton
+      condition: Available
+      status: "True"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    VPA update mode fixed — no more surprise evictions.
+
+    **Key takeaway:** VPA Auto mode evicts running pods to apply right-sized
+    requests. On a single-replica deployment this causes full downtime.
+    Use Initial mode instead — VPA applies recommendations only at pod creation
+    time and never evicts running pods. Off mode is safest for audit-only use.
+
+    The four modes in order of disruption:
+      Off       → recommend only, touch nothing
+      Initial   → apply at pod creation only
+      Recreate  → evict when drift is large
+      Auto      → Recreate + Initial combined
+
+  tasking:
+    ticket: "OPS-3512"
+    priority: "P0"
+    summary: "Production service going down every few minutes, VPA is evicting the only pod"
+    description: |
+      Single-replica production service is experiencing 30-60 second outages
+      every few minutes. VPA Auto mode is evicting the running pod to apply
+      resource recommendation updates. With only one replica there is nothing
+      to serve traffic during the eviction.
+
+      Fix VPA without removing it — we still want recommendations.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "auto mode means it handles everything automatically, which is what we want"
+    onCheckFail: "the pod always comes back, i don't see what the problem is"
+    onHintUsed: "there are different auto modes?"
+    onComplete: "initial mode applies it when the pod restarts naturally, not by killing it. that's the one."

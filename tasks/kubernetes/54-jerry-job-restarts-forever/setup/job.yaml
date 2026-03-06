@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jerry-seed
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: OnFailure   # Wrong — this causes restarts even on exit 0 in some scenarios
+                                  # but more importantly students must learn Never is the right choice
+      containers:
+      - name: seed
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo "Seeding database..."
+          sleep 3
+          echo "Seeding complete"
+          exit 0

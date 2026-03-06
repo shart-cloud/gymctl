@@ -20,6 +20,7 @@ import (
 
 type startOptions struct {
 	noCluster bool
+	provider  string
 }
 
 func newStartCmd() *cobra.Command {
@@ -56,7 +57,7 @@ func newStartCmd() *cobra.Command {
 					return fmt.Errorf("missing kubernetes environment config")
 				}
 
-				k8s := exercise.Spec.Environment.Kubernetes
+				k8s := withProviderOverride(exercise.Spec.Environment.Kubernetes, opts.provider)
 				createCluster := shouldCreateCluster(k8s, opts.noCluster)
 				provider, state, err := resolveKubernetesProviderAndState(exercise.Metadata.Name, k8s)
 				if err != nil {
@@ -211,6 +212,7 @@ func newStartCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&opts.noCluster, "no-cluster", false, "Skip kubernetes cluster creation")
+	cmd.Flags().StringVar(&opts.provider, "provider", "", "Override kubernetes backend provider (kind or vagrant)")
 
 	return cmd
 }

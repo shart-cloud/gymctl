@@ -1,0 +1,117 @@
+meta:
+  id: lab-01-broken-pod
+  title: "Find the Broken Pod"
+  difficulty: beginner
+  time_limit_minutes: 30
+
+# Kubernetes resources served by mock-apiserver.
+# Write these exactly as you would for `kubectl apply -f`.
+resources:
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: production
+
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: web-frontend
+      namespace: production
+      labels:
+        app: web-frontend
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.25
+          ports:
+            - containerPort: 80
+    status:
+      phase: CrashLoopBackOff
+      containerStatuses:
+        - name: web
+          ready: false
+          restartCount: 7
+          state:
+            waiting:
+              reason: CrashLoopBackOff
+              message: "back-off 5m0s restarting failed container=web"
+
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: db-postgres
+      namespace: production
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: password
+    status:
+      phase: Running
+      containerStatuses:
+        - name: postgres
+          ready: true
+          restartCount: 0
+          state:
+            running:
+              startedAt: "2026-02-25T00:00:00Z"
+
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: web-frontend
+      namespace: production
+    spec:
+      selector:
+        app: web-frontend
+      ports:
+        - port: 80
+          targetPort: 80
+      type: ClusterIP
+
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: web-frontend
+      namespace: production
+    spec:
+      replicas: 3
+      selector:
+        matchLabels:
+          app: web-frontend
+      template:
+        metadata:
+          labels:
+            app: web-frontend
+        spec:
+          containers:
+            - name: web
+              image: nginx:1.25
+    status:
+      replicas: 3
+      readyReplicas: 0
+      unavailableReplicas: 3
+
+# Checks evaluated by `gymctl check` (Phase 3).
+checks:
+  - id: identify-broken-pod
+    type: exact_match
+    prompt: "What is the name of the pod in CrashLoopBackOff?"
+    expected: "web-frontend"
+
+  - id: identify-namespace
+    type: exact_match
+    prompt: "Which namespace is the broken pod in?"
+    expected: "production"
+
+  - id: identify-restart-count
+    type: exact_match
+    prompt: "How many times has the broken pod restarted?"
+    expected: "7"

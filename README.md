@@ -75,6 +75,12 @@ gymctl hint
 
 # Show your overall progress
 gymctl status
+
+# Generate a 120-minute CKA-style random exam run
+gymctl exam cka --backend vagrant --duration-minutes 120
+
+# Reproduce same randomized set (seeded)
+gymctl exam cka --backend vagrant --duration-minutes 120 --seed 42
 ```
 
 ---
@@ -96,6 +102,7 @@ gymctl status
 | `gymctl shell` | Open the interactive exercise browser TUI |
 | `gymctl diagnose` | Check Docker/Kubernetes/network prerequisites |
 | `gymctl recover [name]` | Recover from corrupted state |
+| `gymctl exam cka` | Generate a timed random CKA-style Kubernetes exam playlist (supports `--cka-only` and `--domain-balanced`) |
 
 ---
 

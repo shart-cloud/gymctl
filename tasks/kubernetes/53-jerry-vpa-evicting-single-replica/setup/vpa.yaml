@@ -1,0 +1,20 @@
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: jerry-singleton-vpa
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: jerry-singleton
+  updatePolicy:
+    updateMode: "Auto"    # Problem: evicts the only running pod
+  resourcePolicy:
+    containerPolicies:
+    - containerName: app
+      minAllowed:
+        cpu: 10m
+        memory: 16Mi
+      maxAllowed:
+        cpu: 1
+        memory: 512Mi

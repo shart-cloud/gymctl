@@ -1,0 +1,113 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-job-restarts-forever
+  title: "Jerry's One-Shot Job Won't Stop Restarting"
+  track: k8s-workloads
+  week: 4
+  order: 9
+
+spec:
+  difficulty: beginner
+  estimatedTime: 15m
+  points: 100
+
+  description: |
+    Jerry wrote a database seed job that runs, prints "seeding complete",
+    and exits with code 0. But Kubernetes keeps restarting it. The pod has
+    restarted 11 times and counting.
+
+    Jerry copied the pod spec from a Deployment template without reading
+    the docs. A critical field is wrong for batch workloads.
+
+    Fix the Job so it runs once and stops.
+
+  learningOutcomes:
+    - "Understand that Jobs require restartPolicy Never or OnFailure"
+    - "Recognize that restartPolicy Always causes a Job pod to restart on success"
+    - "Fix the restartPolicy and verify the Job completes cleanly"
+
+  tags:
+    - jobs
+    - batch
+    - restartpolicy
+    - workloads
+    - cka
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/job.yaml
+
+  checks:
+    - name: "Job restartPolicy is Never or OnFailure"
+      type: script
+      script: |
+        set -e
+        policy=$(kubectl get job jerry-seed \
+          -o jsonpath='{.spec.template.spec.restartPolicy}' 2>/dev/null || true)
+        if [ "$policy" = "Never" ] || [ "$policy" = "OnFailure" ]; then exit 0; fi
+        echo "FAIL: restartPolicy is '$policy', must be Never or OnFailure for a Job"
+        exit 1
+      expectExitCode: 0
+
+    - name: "Job has reached Completed status"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 30); do
+          complete=$(kubectl get job jerry-seed \
+            -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+          if [ "$complete" = "True" ]; then exit 0; fi
+          sleep 3
+        done
+        echo "FAIL: job has not completed"
+        kubectl describe job jerry-seed | tail -20
+        exit 1
+      expectExitCode: 0
+
+    - name: "Pod restart count is zero or one"
+      type: script
+      script: |
+        set -e
+        restarts=$(kubectl get pods -l job-name=jerry-seed \
+          -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null || echo "0")
+        [ "$restarts" -le 1 ] || { echo "FAIL: pod restarted $restarts times — restartPolicy is still wrong"; exit 1; }
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Job completes cleanly and doesn't restart.
+
+    **Key takeaway:** Deployments use restartPolicy: Always so pods run forever.
+    Jobs must use restartPolicy: Never or OnFailure — Kubernetes rejects any
+    other value. Never creates a new pod on failure. OnFailure restarts the
+    same pod on failure. Either way, a successful exit (code 0) means done.
+
+  tasking:
+    ticket: "OPS-1901"
+    priority: "P2"
+    summary: "Database seed job running 11 times and counting"
+    description: |
+      Jerry wrote a one-shot seed job for the new staging environment. The
+      pod exits successfully every time but immediately restarts. The seed
+      script is idempotent so no data corruption yet, but this is wrong and
+      consuming cluster resources unnecessarily.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "i copied the container spec from my deployment, it should work the same way"
+    onCheckFail: "it's running successfully every time, i don't see the bug"
+    onHintUsed: "jobs have a different restart policy than deployments?"
+    onComplete: "Never. the field is called restartPolicy and for a job it should be Never. noted."

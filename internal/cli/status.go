@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -20,7 +21,7 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(entries) == 0 {
+			if len(entries) == 0 && !isJSONOutput() {
 				ColorWarning.Fprintln(cmd.OutOrStdout(), "No exercises found.")
 				return nil
 			}
@@ -73,10 +74,59 @@ func newStatusCmd() *cobra.Command {
 					if status.Score > 0 {
 						earnedPoints += status.Score
 					}
-				} else if status.Status == "in_progress" {
+				} else if isInProgressStatus(status.Status) {
 					inProgressCount++
 				}
 				trackStats[track] = stats
+			}
+
+			if isJSONOutput() {
+				type statusSummaryJSON struct {
+					Total             int `json:"total"`
+					Completed         int `json:"completed"`
+					InProgress        int `json:"inProgress"`
+					NotStarted        int `json:"notStarted"`
+					TotalPoints       int `json:"totalPoints"`
+					EarnedPoints      int `json:"earnedPoints"`
+					CompletionPercent int `json:"completionPercent"`
+				}
+				type statusResponseJSON struct {
+					Current *string           `json:"current"`
+					Summary statusSummaryJSON `json:"summary"`
+				}
+
+				var current *string
+				currentFilePath, err := resolveCurrentFile()
+				if err == nil {
+					if data, readErr := os.ReadFile(currentFilePath); readErr == nil {
+						name := strings.TrimSpace(string(data))
+						if name != "" {
+							current = &name
+						}
+					}
+				}
+
+				total := len(entries)
+				notStarted := total - completedCount - inProgressCount
+				completionPercent := 0
+				if total > 0 {
+					completionPercent = (completedCount * 100) / total
+				}
+
+				response := statusResponseJSON{
+					Current: current,
+					Summary: statusSummaryJSON{
+						Total:             total,
+						Completed:         completedCount,
+						InProgress:        inProgressCount,
+						NotStarted:        notStarted,
+						TotalPoints:       totalPoints,
+						EarnedPoints:      earnedPoints,
+						CompletionPercent: completionPercent,
+					},
+				}
+
+				return writeJSON(cmd.OutOrStdout(), response)
 			}
 
 			// Print header

@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jerry-singleton
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jerry-singleton
+  template:
+    metadata:
+      labels:
+        app: jerry-singleton
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.25-alpine
+        resources:
+          requests:
+            cpu: 200m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi

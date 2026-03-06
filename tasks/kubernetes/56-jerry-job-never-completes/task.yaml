@@ -1,0 +1,140 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: jerry-job-never-completes
+  title: "Jerry's Batch Job Never Finishes"
+  track: k8s-workloads
+  week: 4
+  order: 11
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 20m
+  points: 120
+
+  description: |
+    Jerry wrote a data processing Job to run 6 tasks in parallel using 3
+    workers at a time. The Job was supposed to finish in minutes. It's been
+    running for half an hour and the status shows 0/6 completions.
+
+    Three pods are Running, but none ever reach Completed. The Job just
+    sits there. No errors, no failures — nothing.
+
+    The problem is in how Jerry set completionMode and parallelism. The
+    workers run forever because they have no way to know which work items
+    are theirs and when to stop.
+
+    Fix the Job so all 6 completions are reached and the Job reaches
+    Complete status.
+
+  learningOutcomes:
+    - "Understand completions, parallelism, and how they interact"
+    - "Recognize that Indexed completion mode assigns each pod a work item index"
+    - "Fix a Job that runs forever because pods don't know when to stop"
+
+  tags:
+    - jobs
+    - batch
+    - parallelism
+    - completions
+    - indexed
+    - workloads
+    - cka
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      createCluster: true
+      namespace: default
+      setupManifests:
+        - setup/job.yaml
+
+  checks:
+    - name: "Job has completions: 6"
+      type: script
+      script: |
+        set -e
+        completions=$(kubectl get job jerry-batch \
+          -o jsonpath='{.spec.completions}' 2>/dev/null || true)
+        [ "$completions" = "6" ] || {
+          echo "FAIL: completions is '$completions', expected 6"
+          exit 1
+        }
+      expectExitCode: 0
+
+    - name: "Job has parallelism: 3"
+      type: script
+      script: |
+        set -e
+        parallelism=$(kubectl get job jerry-batch \
+          -o jsonpath='{.spec.parallelism}' 2>/dev/null || true)
+        [ "$parallelism" = "3" ] || {
+          echo "FAIL: parallelism is '$parallelism', expected 3"
+          exit 1
+        }
+      expectExitCode: 0
+
+    - name: "Job uses Indexed completion mode"
+      type: script
+      script: |
+        set -e
+        mode=$(kubectl get job jerry-batch \
+          -o jsonpath='{.spec.completionMode}' 2>/dev/null || true)
+        [ "$mode" = "Indexed" ] || {
+          echo "FAIL: completionMode is '$mode', expected Indexed"
+          exit 1
+        }
+      expectExitCode: 0
+
+    - name: "Job reaches Complete status"
+      type: script
+      script: |
+        set -e
+        for i in $(seq 1 60); do
+          complete=$(kubectl get job jerry-batch \
+            -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+          if [ "$complete" = "True" ]; then exit 0; fi
+          sleep 5
+        done
+        succeeded=$(kubectl get job jerry-batch -o jsonpath='{.status.succeeded}' 2>/dev/null || echo 0)
+        echo "FAIL: job not complete after 5 minutes (succeeded=$succeeded)"
+        kubectl describe job jerry-batch | tail -20
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    Job completed all 6 items with 3 parallel workers.
+
+    **Key takeaway:**
+    - `completions` is the total number of successful pod runs needed
+    - `parallelism` is how many pods run at the same time
+    - `completionMode: Indexed` assigns each pod a unique index (JOB_COMPLETION_INDEX)
+      so each worker knows exactly which item to process — and when to stop
+    - Without Indexed mode, NonIndexed pods all run the same work and never
+      know when the job as a whole is done (unless the app itself tracks this)
+
+  tasking:
+    ticket: "OPS-2301"
+    priority: "P1"
+    summary: "Batch processing job running for 30 minutes with 0 completions"
+    description: |
+      Jerry set up a Job to process 6 data chunks using 3 parallel workers.
+      The pods are healthy and running, but the Job shows 0/6 completions after
+      30 minutes. The workers loop indefinitely because they can't determine
+      which chunk is theirs or when to exit. Downstream pipeline is blocked.
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "the pods are all running, i don't understand why completions shows 0"
+    onCheckFail: "it's not failing though, the pods are green"
+    onHintUsed: "what is JOB_COMPLETION_INDEX, i've never seen that env var"
+    onComplete: "so each pod needs to know its own index to know what to work on and when to stop. got it."
