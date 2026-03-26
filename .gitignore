@@ -30,6 +30,9 @@ go.work.sum
 *~
 .vscode/
 *.iml
+vscode-extension/node_modules/
+vscode-extension/out/
+vscode-extension/*.vsix
 
 # OS specific files
 .DS_Store
