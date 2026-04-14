@@ -15,7 +15,7 @@ func newDescribeCmd() *cobra.Command {
 		Short: "Describe an exercise",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return err
 			}

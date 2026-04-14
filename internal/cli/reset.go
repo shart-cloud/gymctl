@@ -38,7 +38,7 @@ func newResetCmd() *cobra.Command {
 				name = current
 			}
 
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return err
 			}
@@ -138,6 +138,8 @@ func newResetCmd() *cobra.Command {
 				if err := manager.Setup(ctx, entry.Dir, *exercise.Spec.Environment.Docker); err != nil {
 					return err
 				}
+			case "local":
+				// Reset only touches progress state for local exercises.
 			default:
 				return fmt.Errorf("unsupported environment type: %s", exercise.Spec.Environment.Type)
 			}

@@ -31,7 +31,7 @@ func newSSHCmd() *cobra.Command {
 				exerciseName = current
 			}
 
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return err
 			}

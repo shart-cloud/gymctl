@@ -32,7 +32,7 @@ func newStartCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer RecoverFromPanic(cmd)
 
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return HandleCommandError(cmd, err)
 			}
@@ -155,6 +155,8 @@ func newStartCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+			case "local":
+				// Local exercises assume tools and artifacts already exist in the workspace.
 			default:
 				return fmt.Errorf("unsupported environment type: %s", exercise.Spec.Environment.Type)
 			}

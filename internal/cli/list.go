@@ -23,7 +23,7 @@ func newListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List available exercises",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return err
 			}

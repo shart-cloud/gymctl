@@ -277,10 +277,13 @@ func getSystemChecks() []diagnosticCheck {
 			Category: "System",
 			Required: true,
 			Check: func(ctx context.Context) (bool, string, string) {
-				if _, err := os.Stat(tasksDir); err != nil {
-					return false, fmt.Sprintf("Tasks directory not found: %s", tasksDir), "Ensure you're running from the gymctl directory"
+				dirs := parseTasksDirList(tasksDir)
+				for _, dir := range dirs {
+					if _, err := os.Stat(dir); err != nil {
+						return false, fmt.Sprintf("Tasks directory not found: %s", dir), "Ensure your --tasks-dir or GYMCTL_TASKS_DIRS paths are correct"
+					}
 				}
-				return true, fmt.Sprintf("Found: %s", tasksDir), ""
+				return true, fmt.Sprintf("Found: %s", strings.Join(dirs, ", ")), ""
 			},
 		},
 		{
@@ -324,7 +327,7 @@ func getSystemChecks() []diagnosticCheck {
 
 func diagnoseExercise(cmd *cobra.Command, ctx context.Context, exerciseName string, verbose bool) error {
 	// Load exercise
-	entries, err := scenario.LoadCatalog(tasksDir)
+	entries, err := loadCatalogEntries()
 	if err != nil {
 		return fmt.Errorf("load catalog: %w", err)
 	}
@@ -393,6 +396,8 @@ func diagnoseExercise(cmd *cobra.Command, ctx context.Context, exerciseName stri
 				checkNamespace(cmd, ctx, k8s.Namespace, verbose)
 			}
 		}
+	case "local":
+		ColorInfo.Fprintf(cmd.OutOrStdout(), "  %s Local exercise: no managed environment to diagnose\n", IconSuccess)
 	}
 
 	// Check exercise status

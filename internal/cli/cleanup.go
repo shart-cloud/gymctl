@@ -14,12 +14,12 @@ import (
 
 // CleanupConfig defines cleanup behavior
 type CleanupConfig struct {
-	AutoClean   bool   // Automatically clean without prompting
-	SkipClean   bool   // Skip cleanup entirely
-	CleanImages bool   // Clean Docker images
-	CleanVolumes bool  // Clean Docker volumes
-	CleanContainers bool // Clean stopped containers
-	Exercise    string // Exercise name for targeted cleanup
+	AutoClean       bool   // Automatically clean without prompting
+	SkipClean       bool   // Skip cleanup entirely
+	CleanImages     bool   // Clean Docker images
+	CleanVolumes    bool   // Clean Docker volumes
+	CleanContainers bool   // Clean stopped containers
+	Exercise        string // Exercise name for targeted cleanup
 }
 
 // CleanupHook runs cleanup after successful exercise completion
@@ -342,7 +342,7 @@ This helps reclaim disk space after completing exercises.`,
 
 			// If exercise specified, clean that exercise
 			if exerciseName != "" {
-				entries, err := scenario.LoadCatalog(tasksDir)
+				entries, err := loadCatalogEntries()
 				if err != nil {
 					return err
 				}
@@ -425,7 +425,7 @@ func interactiveCleanup(cmd *cobra.Command, ctx context.Context) error {
 	fmt.Fprintln(cmd.OutOrStdout())
 
 	// List completed exercises with artifacts
-	entries, err := scenario.LoadCatalog(tasksDir)
+	entries, err := loadCatalogEntries()
 	if err != nil {
 		return err
 	}

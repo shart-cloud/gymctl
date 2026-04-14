@@ -34,7 +34,7 @@ all the information students need without requiring the full TUI.`,
 			}
 
 			// Load catalog
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return fmt.Errorf("load catalog: %w", err)
 			}

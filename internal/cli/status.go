@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"gymctl/internal/progress"
-	"gymctl/internal/scenario"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -17,7 +16,7 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show overall progress",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return err
 			}

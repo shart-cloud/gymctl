@@ -47,13 +47,14 @@ func Execute() {
 func init() {
 	rootCmd.SilenceErrors = true
 	rootCmd.SilenceUsage = true
-	rootCmd.PersistentFlags().StringVar(&tasksDir, "tasks-dir", "tasks", "Tasks directory")
+	rootCmd.PersistentFlags().StringVar(&tasksDir, "tasks-dir", "tasks", "Tasks directory or comma-separated list")
 	rootCmd.PersistentFlags().StringVar(&progressFile, "progress-file", "", "Progress file path (default: ~/.gym/progress.yaml)")
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format: table|json")
 	rootCmd.PersistentFlags().BoolVar(&outputJSON, "json", false, "Output in JSON format")
 
 	rootCmd.AddCommand(
 		newValidateCmd(),
+		newAuthorCmd(),
 		newListCmd(),
 		newStartCmd(),
 		newStopCmd(),
@@ -73,7 +74,9 @@ func init() {
 		newEnvCmd(),
 		newKubeconfigCmd(),
 		newInfoCmd(),
+		newObjectivesCmd(),
 		newExamCmd(),
+		newTaskCmd(),
 		newServeCmd(),
 		newLabCmd(),
 	)

@@ -49,7 +49,7 @@ func newWatchCmd() *cobra.Command {
 				name = current
 			}
 
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return err
 			}
@@ -85,6 +85,8 @@ func newWatchCmd() *cobra.Command {
 					return err
 				}
 				return watchDocker(ctx, cmd, entry, workDir, opts)
+			case "local":
+				return watchDocker(ctx, cmd, entry, entry.Dir, opts)
 			default:
 				return watchKubernetes(ctx, cmd, entry, opts)
 			}

@@ -12,40 +12,15 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
+	internalexam "gymctl/internal/exam"
 	"gymctl/internal/scenario"
 )
-
-const (
-	ckaDomainTroubleshooting = "Troubleshooting"
-	ckaDomainClusterArch     = "Cluster Architecture"
-	ckaDomainServicesNet     = "Services and Networking"
-	ckaDomainWorkloads       = "Workloads and Scheduling"
-	ckaDomainStorage         = "Storage"
-)
-
-var ckaDomainOrder = []string{
-	ckaDomainTroubleshooting,
-	ckaDomainClusterArch,
-	ckaDomainServicesNet,
-	ckaDomainWorkloads,
-	ckaDomainStorage,
-}
-
-var ckaDomainWeights = map[string]int{
-	ckaDomainTroubleshooting: 30,
-	ckaDomainClusterArch:     25,
-	ckaDomainServicesNet:     20,
-	ckaDomainWorkloads:       15,
-	ckaDomainStorage:         10,
-}
 
 type examOptions struct {
 	count           int
 	durationMinutes int
 	seed            int64
 	backend         string
-	playlist        string
-	ckaOnly         bool
 	domainBalanced  bool
 }
 
@@ -66,15 +41,20 @@ func newExamCmd() *cobra.Command {
 	opts := &examOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "exam",
+		Use:   "exam <exam-id>",
 		Short: "Generate exam playlists",
-	}
-
-	ckaCmd := &cobra.Command{
-		Use:   "cka",
-		Short: "Generate a timed CKA-style exam run",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if opts.durationMinutes <= 0 {
+			def, ok := internalexam.BuiltIn(args[0])
+			if !ok {
+				return fmt.Errorf("unknown exam %q (available: %s)", args[0], strings.Join(internalexam.IDs(), ", "))
+			}
+
+			durationMinutes := opts.durationMinutes
+			if durationMinutes == 0 {
+				durationMinutes = def.DefaultDuration
+			}
+			if durationMinutes <= 0 {
 				return fmt.Errorf("duration must be > 0 minutes")
 			}
 			if opts.count < 0 {
@@ -82,20 +62,21 @@ func newExamCmd() *cobra.Command {
 			}
 
 			backend := strings.ToLower(strings.TrimSpace(opts.backend))
-			switch backend {
-			case "kind", "vagrant":
-			default:
-				return fmt.Errorf("unsupported backend %q (use kind or vagrant)", opts.backend)
+			if backend == "" {
+				backend = def.DefaultBackend
+			}
+			if err := validateExamBackend(def, backend); err != nil {
+				return err
 			}
 
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return err
 			}
 
-			candidates := filterExamCandidates(entries, opts.playlist, opts.ckaOnly, backend)
+			candidates := filterExamCandidates(entries, def, backend)
 			if len(candidates) == 0 {
-				return fmt.Errorf("no kubernetes exercises found for playlist %q with current filters", opts.playlist)
+				return fmt.Errorf("no exercises found for exam %q with backend %q", def.ID, backend)
 			}
 
 			seed := opts.seed
@@ -103,7 +84,7 @@ func newExamCmd() *cobra.Command {
 				seed = time.Now().UnixNano()
 			}
 
-			selected := selectExamExercises(candidates, opts.count, opts.durationMinutes, seed, opts.domainBalanced)
+			selected := selectExamExercises(candidates, def, opts.count, durationMinutes, seed, opts.domainBalanced)
 			if len(selected) == 0 {
 				return fmt.Errorf("failed to build exam run from available exercises")
 			}
@@ -115,12 +96,12 @@ func newExamCmd() *cobra.Command {
 
 			session := examSession{
 				Version:         1,
-				Mode:            "cka",
-				Playlist:        opts.playlist,
+				Mode:            def.ID,
+				Playlist:        def.TrackPrefix,
 				Backend:         backend,
-				DurationMinutes: opts.durationMinutes,
+				DurationMinutes: durationMinutes,
 				Seed:            seed,
-				CKAOnly:         opts.ckaOnly,
+				CKAOnly:         len(def.AllowedTracks) > 0,
 				DomainBalanced:  opts.domainBalanced,
 				GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
 				Exercises:       names,
@@ -131,45 +112,54 @@ func newExamCmd() *cobra.Command {
 				return err
 			}
 
-			printExamPlan(cmd, selected, sessionPath, session)
+			printExamPlan(cmd, def, selected, sessionPath, session)
 			return nil
 		},
 	}
 
-	ckaCmd.Flags().IntVar(&opts.count, "count", 0, "Number of random tasks (0 = auto-fit by duration)")
-	ckaCmd.Flags().IntVar(&opts.durationMinutes, "duration-minutes", 120, "Exam duration in minutes")
-	ckaCmd.Flags().Int64Var(&opts.seed, "seed", 0, "Random seed for reproducible task selection")
-	ckaCmd.Flags().StringVar(&opts.backend, "backend", "vagrant", "Kubernetes backend for this exam run (kind or vagrant)")
-	ckaCmd.Flags().StringVar(&opts.playlist, "playlist", "k8s", "Playlist to sample from (currently: k8s)")
-	ckaCmd.Flags().BoolVar(&opts.ckaOnly, "cka-only", true, "Exclude non-CKA tracks (GitOps/CI/pipeline-focused tracks)")
-	ckaCmd.Flags().BoolVar(&opts.domainBalanced, "domain-balanced", true, "Bias task selection to CKA domain spread")
+	cmd.Flags().IntVar(&opts.count, "count", 0, "Number of random tasks (0 = auto-fit by duration)")
+	cmd.Flags().IntVar(&opts.durationMinutes, "duration-minutes", 0, "Exam duration in minutes (defaults by exam)")
+	cmd.Flags().Int64Var(&opts.seed, "seed", 0, "Random seed for reproducible task selection")
+	cmd.Flags().StringVar(&opts.backend, "backend", "", "Backend for this exam run (defaults by exam)")
+	cmd.Flags().BoolVar(&opts.domainBalanced, "domain-balanced", true, "Bias task selection to exam domain spread")
 
-	cmd.AddCommand(ckaCmd)
 	return cmd
 }
 
-func filterExamCandidates(entries []scenario.CatalogEntry, playlist string, ckaOnly bool, backend string) []scenario.CatalogEntry {
-	playlist = strings.ToLower(strings.TrimSpace(playlist))
-	if playlist == "" {
-		playlist = "k8s"
+func validateExamBackend(def internalexam.Definition, backend string) error {
+	backend = strings.ToLower(strings.TrimSpace(backend))
+	switch backend {
+	case "kind", "vagrant":
+		if def.DefaultBackend == "local" {
+			return fmt.Errorf("unsupported backend %q for exam %q (use local)", backend, def.ID)
+		}
+		return nil
+	case "local":
+		if def.DefaultBackend != "local" {
+			return fmt.Errorf("unsupported backend %q for exam %q (use kind or vagrant)", backend, def.ID)
+		}
+		return nil
+	default:
+		if def.DefaultBackend == "local" {
+			return fmt.Errorf("unsupported backend %q (use local)", backend)
+		}
+		return fmt.Errorf("unsupported backend %q (use kind or vagrant)", backend)
 	}
+}
 
+func filterExamCandidates(entries []scenario.CatalogEntry, def internalexam.Definition, backend string) []scenario.CatalogEntry {
 	out := make([]scenario.CatalogEntry, 0, len(entries))
 	for _, entry := range entries {
 		ex := entry.Exercise
-		if ex == nil || ex.Spec.Environment.Type != "kubernetes" {
+		if ex == nil {
 			continue
 		}
 
-		if !matchesPlaylist(ex, playlist) {
+		if !matchesExamTrack(ex, def) {
 			continue
 		}
 
-		if ckaOnly && !isCKAAlignedTrack(ex.Metadata.Track) {
-			continue
-		}
-
-		if !isBackendCompatible(entry, backend) {
+		if !isBackendCompatible(entry, def, backend) {
 			continue
 		}
 
@@ -183,31 +173,32 @@ func filterExamCandidates(entries []scenario.CatalogEntry, playlist string, ckaO
 	return out
 }
 
-func matchesPlaylist(ex *scenario.Exercise, playlist string) bool {
-	switch playlist {
-	case "k8s", "kubernetes":
-		return strings.HasPrefix(strings.ToLower(ex.Metadata.Track), "k8s")
-	default:
+func matchesExamTrack(ex *scenario.Exercise, def internalexam.Definition) bool {
+	track := strings.ToLower(strings.TrimSpace(ex.Metadata.Track))
+	if len(def.AllowedTracks) > 0 {
+		for _, allowed := range def.AllowedTracks {
+			if track == strings.ToLower(strings.TrimSpace(allowed)) {
+				return true
+			}
+		}
 		return false
 	}
-}
-
-func isCKAAlignedTrack(track string) bool {
-	track = strings.ToLower(strings.TrimSpace(track))
-	allowed := map[string]bool{
-		"k8s-fundamentals":    true,
-		"k8s-networking":      true,
-		"k8s-troubleshooting": true,
-		"k8s-admin":           true,
-		"k8s-storage":         true,
-		"k8s-workloads":       true,
-		"k8s-autoscaling":     true,
+	if def.TrackPrefix == "" {
+		return true
 	}
-	return allowed[track]
+	return strings.HasPrefix(track, strings.ToLower(def.TrackPrefix))
 }
 
-func isBackendCompatible(entry scenario.CatalogEntry, backend string) bool {
+func isBackendCompatible(entry scenario.CatalogEntry, def internalexam.Definition, backend string) bool {
 	backend = strings.ToLower(strings.TrimSpace(backend))
+	if backend == "local" {
+		return entry.Exercise != nil && entry.Exercise.Spec.Environment.Type == "local"
+	}
+
+	if entry.Exercise == nil || entry.Exercise.Spec.Environment.Type != "kubernetes" {
+		return false
+	}
+
 	if backend != "vagrant" {
 		return true
 	}
@@ -253,7 +244,7 @@ func containsAnyLower(text string, needles []string) bool {
 	return false
 }
 
-func selectExamExercises(candidates []scenario.CatalogEntry, count, durationMinutes int, seed int64, domainBalanced bool) []scenario.CatalogEntry {
+func selectExamExercises(candidates []scenario.CatalogEntry, def internalexam.Definition, count, durationMinutes int, seed int64, domainBalanced bool) []scenario.CatalogEntry {
 	r := rand.New(rand.NewSource(seed))
 	shuffled := append([]scenario.CatalogEntry(nil), candidates...)
 	r.Shuffle(len(shuffled), func(i, j int) {
@@ -266,7 +257,7 @@ func selectExamExercises(candidates []scenario.CatalogEntry, count, durationMinu
 
 	buckets := make(map[string][]scenario.CatalogEntry)
 	for _, entry := range shuffled {
-		domain := classifyCKADomain(entry.Exercise)
+		domain := classifyDomain(entry.Exercise, def)
 		buckets[domain] = append(buckets[domain], entry)
 	}
 
@@ -275,7 +266,7 @@ func selectExamExercises(candidates []scenario.CatalogEntry, count, durationMinu
 	usedMinutes := 0
 
 	if count > 0 {
-		for _, domain := range ckaDomainOrder {
+		for _, domain := range def.DomainOrder {
 			if len(selected) >= count {
 				break
 			}
@@ -290,7 +281,7 @@ func selectExamExercises(candidates []scenario.CatalogEntry, count, durationMinu
 		}
 
 		for len(selected) < count {
-			domain, ok := weightedDomainPick(r, buckets, durationMinutes-usedMinutes, used)
+			domain, ok := weightedDomainPick(r, buckets, def, durationMinutes-usedMinutes, used)
 			if !ok {
 				break
 			}
@@ -310,7 +301,7 @@ func selectExamExercises(candidates []scenario.CatalogEntry, count, durationMinu
 		return selected
 	}
 
-	for _, domain := range ckaDomainOrder {
+	for _, domain := range def.DomainOrder {
 		entry, ok, rest := popFitting(buckets[domain], durationMinutes-usedMinutes, used)
 		buckets[domain] = rest
 		if !ok {
@@ -322,7 +313,7 @@ func selectExamExercises(candidates []scenario.CatalogEntry, count, durationMinu
 	}
 
 	for {
-		domain, ok := weightedDomainPick(r, buckets, durationMinutes-usedMinutes, used)
+		domain, ok := weightedDomainPick(r, buckets, def, durationMinutes-usedMinutes, used)
 		if !ok {
 			break
 		}
@@ -386,13 +377,13 @@ func popFitting(bucket []scenario.CatalogEntry, remainingMinutes int, used map[s
 	return scenario.CatalogEntry{}, false, entries
 }
 
-func weightedDomainPick(r *rand.Rand, buckets map[string][]scenario.CatalogEntry, remainingMinutes int, used map[string]bool) (string, bool) {
+func weightedDomainPick(r *rand.Rand, buckets map[string][]scenario.CatalogEntry, def internalexam.Definition, remainingMinutes int, used map[string]bool) (string, bool) {
 	total := 0
-	available := make([]string, 0, len(ckaDomainOrder))
-	for _, domain := range ckaDomainOrder {
+	available := make([]string, 0, len(def.DomainOrder))
+	for _, domain := range def.DomainOrder {
 		if hasFittingCandidate(buckets[domain], remainingMinutes, used) {
 			available = append(available, domain)
-			total += ckaDomainWeights[domain]
+			total += def.DomainWeights[domain]
 		}
 	}
 
@@ -403,7 +394,7 @@ func weightedDomainPick(r *rand.Rand, buckets map[string][]scenario.CatalogEntry
 	pick := r.Intn(total)
 	running := 0
 	for _, domain := range available {
-		running += ckaDomainWeights[domain]
+		running += def.DomainWeights[domain]
 		if pick < running {
 			return domain, true
 		}
@@ -424,7 +415,33 @@ func hasFittingCandidate(bucket []scenario.CatalogEntry, remainingMinutes int, u
 	return false
 }
 
+func classifyDomain(ex *scenario.Exercise, def internalexam.Definition) string {
+	if strings.HasPrefix(strings.ToLower(def.ID), "gx-") {
+		return classifyGXDomain(ex, def)
+	}
+	return classifyCKADomain(ex)
+}
+
+func classifyGXDomain(ex *scenario.Exercise, def internalexam.Definition) string {
+	if ex == nil || len(def.Domains) == 0 {
+		return ""
+	}
+	if ex.Metadata.GXObjective == "" {
+		return def.Domains[0].Name
+	}
+	domainID := strings.Split(ex.Metadata.GXObjective, ".")[0]
+	return def.DomainNameByID(domainID)
+}
+
 func classifyCKADomain(ex *scenario.Exercise) string {
+	const (
+		ckaDomainTroubleshooting = "Troubleshooting"
+		ckaDomainClusterArch     = "Cluster Architecture"
+		ckaDomainServicesNet     = "Services and Networking"
+		ckaDomainWorkloads       = "Workloads and Scheduling"
+		ckaDomainStorage         = "Storage"
+	)
+
 	if ex == nil {
 		return ckaDomainTroubleshooting
 	}
@@ -526,12 +543,12 @@ func writeExamSession(session examSession) (string, error) {
 	return path, nil
 }
 
-func printExamPlan(cmd *cobra.Command, selected []scenario.CatalogEntry, sessionPath string, session examSession) {
+func printExamPlan(cmd *cobra.Command, def internalexam.Definition, selected []scenario.CatalogEntry, sessionPath string, session examSession) {
 	out := cmd.OutOrStdout()
 
-	ColorHeader.Fprintln(out, "CKA Exam Mode")
+	ColorHeader.Fprintln(out, def.Name)
 	ColorDim.Fprintf(out, "Duration: %d minutes  |  Backend: %s  |  Seed: %d\n", session.DurationMinutes, session.Backend, session.Seed)
-	ColorDim.Fprintf(out, "Filters: cka-only=%t, domain-balanced=%t\n", session.CKAOnly, session.DomainBalanced)
+	ColorDim.Fprintf(out, "Filters: domain-balanced=%t\n", session.DomainBalanced)
 	fmt.Fprintln(out)
 
 	totalMinutes := 0
@@ -539,7 +556,7 @@ func printExamPlan(cmd *cobra.Command, selected []scenario.CatalogEntry, session
 	for i, entry := range selected {
 		mins := estimatedMinutes(entry.Exercise.Spec.EstimatedTime)
 		totalMinutes += mins
-		domain := classifyCKADomain(entry.Exercise)
+		domain := classifyDomain(entry.Exercise, def)
 		domainCounts[domain]++
 		fmt.Fprintf(out, "%2d. %s (%s, %dm, %s)\n", i+1, entry.Exercise.Metadata.Name, entry.Exercise.Spec.Difficulty, mins, domain)
 	}
@@ -550,16 +567,21 @@ func printExamPlan(cmd *cobra.Command, selected []scenario.CatalogEntry, session
 	fmt.Fprintln(out)
 
 	ColorBold.Fprintln(out, "Domain spread:")
-	for _, domain := range ckaDomainOrder {
+	for _, domain := range def.DomainOrder {
 		fmt.Fprintf(out, "- %s: %d\n", domain, domainCounts[domain])
 	}
 	fmt.Fprintln(out)
 
 	ColorBold.Fprintln(out, "Runbook:")
 	for i, entry := range selected {
-		fmt.Fprintf(out, "%2d) gymctl start %s --provider %s\n", i+1, entry.Exercise.Metadata.Name, session.Backend)
-		fmt.Fprintln(out, "   gymctl check --verbose --no-cleanup")
-		fmt.Fprintln(out, "   gymctl stop")
+		if session.Backend == "local" {
+			fmt.Fprintf(out, "%2d) gymctl start %s\n", i+1, entry.Exercise.Metadata.Name)
+			fmt.Fprintf(out, "   gymctl check %s --verbose --no-cleanup\n", entry.Exercise.Metadata.Name)
+		} else {
+			fmt.Fprintf(out, "%2d) gymctl start %s --provider %s\n", i+1, entry.Exercise.Metadata.Name, session.Backend)
+			fmt.Fprintf(out, "   gymctl check %s --verbose --no-cleanup\n", entry.Exercise.Metadata.Name)
+			fmt.Fprintln(out, "   gymctl stop")
+		}
 	}
 	fmt.Fprintln(out)
 	ColorDim.Fprintln(out, "Tip: use --seed to reproduce this exact exam set.")

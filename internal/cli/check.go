@@ -56,7 +56,7 @@ func newCheckCmd() *cobra.Command {
 					name = current
 				}
 
-				entries, err := scenario.LoadCatalog(tasksDir)
+				entries, err := loadCatalogEntries()
 				if err != nil {
 					return err
 				}

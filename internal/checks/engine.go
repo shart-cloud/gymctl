@@ -103,6 +103,9 @@ func runCheck(ctx context.Context, exercise *scenario.Exercise, workDir string, 
 			result.Message = fmt.Sprintf("unsupported check type: %s", check.Type)
 			return result
 		}
+	case "local":
+		result.Message = fmt.Sprintf("unsupported local-only check type: %s", check.Type)
+		return result
 	default:
 		result.Message = "unsupported environment for checks"
 		return result

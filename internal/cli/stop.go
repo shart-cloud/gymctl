@@ -28,7 +28,7 @@ func newStopCmd() *cobra.Command {
 				name = current
 			}
 
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return err
 			}
@@ -79,6 +79,8 @@ func newStopCmd() *cobra.Command {
 				if err := manager.Teardown(ctx, entry.Dir, *exercise.Spec.Environment.Docker); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to teardown docker: %v\n", err)
 				}
+			case "local":
+				// Nothing to tear down for local exercises.
 
 			default:
 				return fmt.Errorf("unsupported environment type: %s", exercise.Spec.Environment.Type)

@@ -155,7 +155,7 @@ func newRecoverCmd() *cobra.Command {
 }
 
 func recoverExercise(cmd *cobra.Command, exerciseName, backupPath string, force bool) error {
-	entries, err := scenario.LoadCatalog(tasksDir)
+	entries, err := loadCatalogEntries()
 	if err != nil {
 		return err
 	}
@@ -204,6 +204,7 @@ func recoverExercise(cmd *cobra.Command, exerciseName, backupPath string, force 
 				_ = environment.DeleteExerciseState(exerciseName)
 			}
 		}
+	case "local":
 	}
 	spinner.Success("Environment cleaned")
 

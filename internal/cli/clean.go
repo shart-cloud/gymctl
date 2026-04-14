@@ -22,7 +22,7 @@ func newCleanCmd() *cobra.Command {
 		Use:   "clean",
 		Short: "Clean up environments",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return err
 			}
@@ -58,6 +58,7 @@ func newCleanCmd() *cobra.Command {
 							_ = provider.Teardown(ctx, state)
 						}
 						_ = environment.DeleteExerciseState(exercise.Metadata.Name)
+					case "local":
 					}
 				}
 			} else {
@@ -86,6 +87,7 @@ func newCleanCmd() *cobra.Command {
 								}
 								_ = environment.DeleteExerciseState(exercise.Metadata.Name)
 							}
+						case "local":
 						}
 					}
 				}

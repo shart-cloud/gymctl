@@ -27,7 +27,7 @@ or directly exec into the workstation container if --workstation is used.`,
 				return execIntoWorkstation(cmd)
 			}
 
-			catalog, err := scenario.LoadCatalog(tasksDir)
+			catalog, err := loadCatalogEntries()
 			if err != nil {
 				return fmt.Errorf("load catalog: %w", err)
 			}
@@ -63,7 +63,7 @@ func execIntoWorkstation(cmd *cobra.Command) error {
 	if err != nil {
 		fmt.Fprintf(cmd.OutOrStderr(), "Warning: No current exercise found (%v)\n", err)
 	} else {
-		entries, loadErr := scenario.LoadCatalog(tasksDir)
+		entries, loadErr := loadCatalogEntries()
 		if loadErr == nil {
 			if entry, found := scenario.FindByName(entries, currentExercise); found {
 				collected, warnings, envErr := collectExerciseEnv(ctx, entry.Exercise)

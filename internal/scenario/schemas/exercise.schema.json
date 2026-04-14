@@ -17,6 +17,7 @@
         "name": {"type": "string"},
         "title": {"type": "string"},
         "track": {"type": "string"},
+        "gxObjective": {"type": "string"},
         "week": {"type": "integer"},
         "order": {"type": "integer"}
       },
@@ -51,7 +52,7 @@
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["docker", "kubernetes", "hybrid"]
+              "enum": ["docker", "kubernetes", "hybrid", "local"]
             },
             "kubernetes": {
               "type": "object",

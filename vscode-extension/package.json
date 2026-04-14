@@ -20,7 +20,7 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "viewContainers": {
+    "viewsContainers": {
       "activitybar": [
         {
           "id": "gymctl-lab-companion",

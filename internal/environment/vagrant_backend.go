@@ -23,7 +23,7 @@ const (
 
 // BackendDescriptor holds display metadata for a backend.
 type BackendDescriptor struct {
-	DisplayName    string
+	DisplayName      string
 	SupportsStaticIP bool
 }
 

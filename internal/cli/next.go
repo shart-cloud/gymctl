@@ -14,12 +14,16 @@ import (
 )
 
 func newNextCmd() *cobra.Command {
-	return &cobra.Command{
+	opts := struct {
+		track string
+	}{}
+
+	cmd := &cobra.Command{
 		Use:   "next",
 		Short: "Show your next assignment from GRIM",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entries, err := scenario.LoadCatalog(tasksDir)
+			entries, err := loadCatalogEntries()
 			if err != nil {
 				return HandleCommandError(cmd, err)
 			}
@@ -48,6 +52,10 @@ func newNextCmd() *cobra.Command {
 				name := entry.Exercise.Metadata.Name
 				st := pf.Exercises[name]
 				isLocked, _ := isExerciseLocked(entry.Exercise, pf)
+
+				if opts.track != "" && !strings.EqualFold(entry.Exercise.Metadata.Track, opts.track) {
+					continue
+				}
 
 				switch {
 				case st.Status == "completed":
@@ -130,4 +138,7 @@ func newNextCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&opts.track, "track", "", "Filter by track")
+	return cmd
 }

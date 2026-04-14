@@ -8,11 +8,12 @@ type Exercise struct {
 }
 
 type ExerciseMeta struct {
-	Name  string `yaml:"name"`
-	Title string `yaml:"title"`
-	Track string `yaml:"track"`
-	Week  int    `yaml:"week,omitempty"`
-	Order int    `yaml:"order,omitempty"`
+	Name        string `yaml:"name"`
+	Title       string `yaml:"title"`
+	Track       string `yaml:"track"`
+	Week        int    `yaml:"week,omitempty"`
+	Order       int    `yaml:"order,omitempty"`
+	GXObjective string `yaml:"gxObjective,omitempty"`
 }
 
 type ExerciseSpec struct {

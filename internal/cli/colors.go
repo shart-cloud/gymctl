@@ -15,9 +15,9 @@ var (
 	ColorInfo    = color.New(color.FgCyan)
 
 	// Text styles
-	ColorBold     = color.New(color.Bold)
-	ColorDim      = color.New(color.Faint)
-	ColorHeader   = color.New(color.FgWhite, color.Bold, color.Underline)
+	ColorBold   = color.New(color.Bold)
+	ColorDim    = color.New(color.Faint)
+	ColorHeader = color.New(color.FgWhite, color.Bold, color.Underline)
 
 	// Specific element colors
 	ColorTrack      = color.New(color.FgMagenta, color.Bold)
