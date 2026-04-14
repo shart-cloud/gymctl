@@ -1,6 +1,9 @@
 package scenario
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseLabSections(t *testing.T) {
 	content := []byte("# Title\n\nIntro paragraph.\n\n```mcq id=q1\nWhat does ssh do?\n- [ ] Opens a browser\n- [x] Connects to a remote shell\n- [ ] Deletes files\n```\n\n## Next\nMore practice.\n")
@@ -40,5 +43,24 @@ func TestParseLabSectionsMissingMCQID(t *testing.T) {
 	_, err := ParseLabSections([]byte("```mcq\nQuestion\n- [ ] A\n```\n"))
 	if err == nil {
 		t.Fatalf("expected error for missing id")
+	}
+}
+
+func TestSetMCQSelection(t *testing.T) {
+	content := []byte("```mcq id=q1\nQuestion\n- [ ] A\n- [x] B\n- [ ] C\n```\n")
+	updated, err := SetMCQSelection(content, "q1", "C")
+	if err != nil {
+		t.Fatalf("SetMCQSelection() error = %v", err)
+	}
+	got := string(updated)
+	if !strings.Contains(got, "- [ ] B") || !strings.Contains(got, "- [x] C") {
+		t.Fatalf("unexpected updated content:\n%s", got)
+	}
+}
+
+func TestSetMCQSelectionMissingQuestion(t *testing.T) {
+	_, err := SetMCQSelection([]byte("```mcq id=q1\n- [ ] A\n```\n"), "q9", "A")
+	if err == nil {
+		t.Fatalf("expected error for missing question")
 	}
 }

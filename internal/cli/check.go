@@ -265,6 +265,9 @@ func newCheckCmd() *cobra.Command {
 			dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(exercise.Spec.JerryDialog, "onCheckFail", exercise.Metadata.Name))
 			fmt.Fprintln(cmd.OutOrStdout())
 			ColorWarning.Fprintf(cmd.OutOrStdout(), "⚠ Exercise not complete. %d/%d checks passed.\n", passedCount, totalCount)
+			if len(mcqResults) > 0 {
+				ColorDim.Fprintln(cmd.OutOrStdout(), "Use `gymctl quiz` to answer multiple-choice questions.")
+			}
 			if !opts.verbose {
 				ColorDim.Fprintln(cmd.OutOrStdout(), "Use --verbose flag for detailed error messages.")
 			}

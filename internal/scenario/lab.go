@@ -120,3 +120,63 @@ func parseLabMCQPrompt(id string, lines []string) *LabMCQPrompt {
 	prompt.Question = strings.TrimSpace(strings.Join(questionLines, "\n"))
 	return prompt
 }
+
+func SetMCQSelection(content []byte, questionID, letter string) ([]byte, error) {
+	lines := splitMCQLines(string(content))
+	letter = strings.ToUpper(strings.TrimSpace(letter))
+	updated := false
+
+	for i := 0; i < len(lines); i++ {
+		open := mcqOpenFencePattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r\n"))
+		if open == nil || !isMCQInfoString(strings.TrimSpace(open[2])) {
+			continue
+		}
+
+		id, ok := parseMCQID(strings.TrimSpace(open[2]))
+		if !ok {
+			return nil, fmt.Errorf("mcq block on line %d is missing id=<id>", i+1)
+		}
+		if id != questionID {
+			continue
+		}
+
+		fence := open[1]
+		fenceChar := string(fence[0])
+		fenceLen := len(fence)
+		optionCount := 0
+		closed := false
+
+		for j := i + 1; j < len(lines); j++ {
+			currentLine := strings.TrimRight(lines[j], "\r\n")
+			if isClosingFence(currentLine, fenceChar, fenceLen) {
+				closed = true
+				i = j
+				break
+			}
+
+			matches := mcqOptionLinePattern.FindStringSubmatch(currentLine)
+			if matches == nil {
+				continue
+			}
+
+			currentLetter := OptionLetter(optionCount)
+			mark := " "
+			if currentLetter == letter {
+				mark = "x"
+				updated = true
+			}
+			lines[j] = matches[1] + "- [" + mark + "]" + matches[3]
+			optionCount++
+		}
+
+		if !closed {
+			return nil, fmt.Errorf("mcq block %q is missing a closing fence", id)
+		}
+		if !updated {
+			return nil, fmt.Errorf("option %q not found for mcq %q", letter, questionID)
+		}
+		return []byte(strings.Join(lines, "")), nil
+	}
+
+	return nil, fmt.Errorf("mcq %q not found", questionID)
+}
