@@ -2,7 +2,7 @@
   "name": "gymctl-lab-companion",
   "displayName": "Lab Companion",
   "description": "VS Code sidebar for gymctl labs",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "shart-cloud",
   "engines": {
     "vscode": "^1.90.0"
@@ -15,6 +15,7 @@
     "onCommand:gymctl.runChecks",
     "onCommand:gymctl.refresh",
     "onCommand:gymctl.openTerminal",
+    "onCommand:gymctl.openLab",
     "onCommand:gymctl.nextHint",
     "onCommand:gymctl.setActive"
   ],
@@ -64,6 +65,10 @@
       {
         "command": "gymctl.openTerminal",
         "title": "Open Terminal"
+      },
+      {
+        "command": "gymctl.openLab",
+        "title": "Open Lab"
       }
     ],
     "menus": {
@@ -82,6 +87,11 @@
           "command": "gymctl.nextHint",
           "when": "view == gymctl-lab-companion.labView",
           "group": "navigation@2"
+        },
+        {
+          "command": "gymctl.openLab",
+          "when": "view == gymctl-lab-companion.labView",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -91,6 +101,10 @@
         },
         {
           "command": "gymctl.runChecks",
+          "when": "view == gymctl-lab-companion.labView && viewItem == exercise"
+        },
+        {
+          "command": "gymctl.openLab",
           "when": "view == gymctl-lab-companion.labView && viewItem == exercise"
         }
       ]

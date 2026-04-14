@@ -20,7 +20,7 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		if cmd.Name() == "check" || cmd.Name() == "hint" {
+		if cmd.Name() == "check" || cmd.Name() == "hint" || cmd.Name() == "describe" {
 			specPath, err := cmd.Flags().GetString("spec")
 			if err == nil && strings.TrimSpace(specPath) != "" {
 				return nil

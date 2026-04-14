@@ -68,3 +68,35 @@ export interface HintResponse {
   hintsRemaining: number;
   nextHintCost: number;
 }
+
+export interface LabSection {
+  type: "markdown" | "mcq";
+  markdown?: string;
+  mcq?: {
+    id: string;
+    question?: string;
+    options: Array<{
+      letter: string;
+      text: string;
+      selected: boolean;
+    }>;
+    selected?: string[];
+  };
+}
+
+export interface DescribeResponse {
+  name: string;
+  title: string;
+  track: string;
+  week?: number;
+  order?: number;
+  difficulty: string;
+  estimatedTime?: string;
+  points: number;
+  description?: string;
+  learningOutcomes?: string[];
+  tags?: string[];
+  prerequisites?: string[];
+  labPath?: string;
+  labSections?: LabSection[];
+}
