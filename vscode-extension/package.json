@@ -19,6 +19,13 @@
     "onCommand:gymctl.setActive"
   ],
   "main": "./out/extension.js",
+  "files": [
+    "out/**",
+    "media/**",
+    "README.md",
+    "LICENSE.txt",
+    "package.json"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
