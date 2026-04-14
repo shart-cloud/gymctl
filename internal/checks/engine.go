@@ -27,6 +27,12 @@ type Result struct {
 	Message string
 }
 
+type MCQResult struct {
+	ID      string
+	Passed  bool
+	Message string
+}
+
 func RunExerciseChecks(ctx context.Context, exercise *scenario.Exercise, workDir string) ([]Result, bool) {
 	var results []Result
 	allPassed := true
@@ -38,6 +44,58 @@ func RunExerciseChecks(ctx context.Context, exercise *scenario.Exercise, workDir
 		}
 	}
 	return results, allPassed
+}
+
+func RunMCQChecks(checksFile *scenario.ChecksFile, labPath string) ([]MCQResult, bool, error) {
+	if checksFile == nil || len(checksFile.MCQs) == 0 {
+		return nil, true, nil
+	}
+
+	data, err := os.ReadFile(labPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("read lab markdown: %w", err)
+	}
+
+	blocks, err := scenario.ParseMCQMarkdown(data)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse lab markdown: %w", err)
+	}
+
+	selectedByID := make(map[string]scenario.MCQBlock, len(blocks))
+	for _, block := range blocks {
+		selectedByID[block.ID] = block
+	}
+
+	results := make([]MCQResult, 0, len(checksFile.MCQs))
+	allPassed := true
+	for _, check := range checksFile.MCQs {
+		result := MCQResult{ID: check.ID}
+		block, ok := selectedByID[check.ID]
+		if !ok {
+			result.Message = "question not found in lab.md"
+			results = append(results, result)
+			allPassed = false
+			continue
+		}
+
+		switch len(block.SelectedLetters) {
+		case 0:
+			result.Message = "no answer selected"
+			allPassed = false
+		case 1:
+			result.Passed = scenario.HashMCQAnswer(check.ID, block.SelectedLetters[0]) == check.AnswerHash
+			if !result.Passed {
+				allPassed = false
+			}
+		default:
+			result.Message = "multiple answers selected"
+			allPassed = false
+		}
+
+		results = append(results, result)
+	}
+
+	return results, allPassed, nil
 }
 
 func runCheck(ctx context.Context, exercise *scenario.Exercise, workDir string, check scenario.Check) Result {

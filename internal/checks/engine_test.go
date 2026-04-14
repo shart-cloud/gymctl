@@ -390,6 +390,90 @@ CMD ["sh"]
 	}
 }
 
+func TestRunMCQChecks(t *testing.T) {
+	tmpDir := t.TempDir()
+	labPath := filepath.Join(tmpDir, "lab.md")
+
+	checksFile := &scenario.ChecksFile{
+		MCQs: []scenario.MCQCheck{
+			{ID: "q1", AnswerHash: scenario.HashMCQAnswer("q1", "B")},
+			{ID: "q2", AnswerHash: scenario.HashMCQAnswer("q2", "C")},
+			{ID: "q3", AnswerHash: scenario.HashMCQAnswer("q3", "A")},
+			{ID: "q4", AnswerHash: scenario.HashMCQAnswer("q4", "A")},
+		},
+	}
+
+	lab := "" +
+		"```mcq id=q1\n" +
+		"- [ ] A\n" +
+		"- [x] B\n" +
+		"- [ ] C\n" +
+		"```\n" +
+		"```mcq id=q2\n" +
+		"- [ ] A\n" +
+		"- [ ] B\n" +
+		"- [ ] C\n" +
+		"```\n" +
+		"```mcq id=q3\n" +
+		"- [x] A\n" +
+		"- [x] B\n" +
+		"- [ ] C\n" +
+		"```\n" +
+		"```mcq id=q4\n" +
+		"- [ ] A\n" +
+		"- [x] B\n" +
+		"- [ ] C\n" +
+		"```\n"
+	if err := os.WriteFile(labPath, []byte(lab), 0o644); err != nil {
+		t.Fatalf("write lab markdown: %v", err)
+	}
+
+	results, allPassed, err := RunMCQChecks(checksFile, labPath)
+	if err != nil {
+		t.Fatalf("RunMCQChecks() error = %v", err)
+	}
+	if allPassed {
+		t.Fatalf("expected allPassed to be false")
+	}
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(results))
+	}
+
+	if !results[0].Passed {
+		t.Fatalf("expected q1 to pass: %+v", results[0])
+	}
+	if results[1].Passed || results[1].Message != "no answer selected" {
+		t.Fatalf("expected q2 no answer result, got %+v", results[1])
+	}
+	if results[2].Passed || results[2].Message != "multiple answers selected" {
+		t.Fatalf("expected q3 multiple answers result, got %+v", results[2])
+	}
+	if results[3].Passed || results[3].Message != "" {
+		t.Fatalf("expected q4 incorrect answer result, got %+v", results[3])
+	}
+}
+
+func TestRunMCQChecksQuestionMissingFromLab(t *testing.T) {
+	tmpDir := t.TempDir()
+	labPath := filepath.Join(tmpDir, "lab.md")
+	if err := os.WriteFile(labPath, []byte("```mcq id=q1\n- [x] A\n```\n"), 0o644); err != nil {
+		t.Fatalf("write lab markdown: %v", err)
+	}
+
+	results, allPassed, err := RunMCQChecks(&scenario.ChecksFile{
+		MCQs: []scenario.MCQCheck{{ID: "q2", AnswerHash: scenario.HashMCQAnswer("q2", "A")}},
+	}, labPath)
+	if err != nil {
+		t.Fatalf("RunMCQChecks() error = %v", err)
+	}
+	if allPassed {
+		t.Fatalf("expected allPassed to be false")
+	}
+	if len(results) != 1 || results[0].Message != "question not found in lab.md" {
+		t.Fatalf("unexpected results: %+v", results)
+	}
+}
+
 func TestRunHTTPCheck(t *testing.T) {
 	// Create a test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

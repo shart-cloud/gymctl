@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -34,12 +36,14 @@ func newCheckCmd() *cobra.Command {
 			}
 
 			var exercise *scenario.Exercise
+			exerciseDir := ""
 			if opts.spec != "" {
 				loaded, err := scenario.LoadExerciseFile(opts.spec)
 				if err != nil {
 					return err
 				}
 				exercise = loaded
+				exerciseDir = filepath.Dir(opts.spec)
 			} else {
 				name := ""
 				if len(args) == 1 {
@@ -65,6 +69,7 @@ func newCheckCmd() *cobra.Command {
 					return fmt.Errorf("exercise not found: %s", name)
 				}
 				exercise = entry.Exercise
+				exerciseDir = entry.Dir
 			}
 
 			ctx := cmd.Context()
@@ -93,18 +98,48 @@ func newCheckCmd() *cobra.Command {
 
 			results, allPassed := checks.RunExerciseChecks(ctx, exercise, workDir)
 
+			var mcqResults []checks.MCQResult
+			checksFile, _, err := scenario.LoadChecksFileIfExists(exerciseDir)
+			if err != nil {
+				return err
+			}
+			if checksFile != nil && len(checksFile.MCQs) > 0 {
+				labPath := filepath.Join(exerciseDir, "lab.md")
+				if _, err := os.Stat(labPath); err == nil {
+					var mcqAllPassed bool
+					mcqResults, mcqAllPassed, err = checks.RunMCQChecks(checksFile, labPath)
+					if err != nil {
+						return err
+					}
+					allPassed = allPassed && mcqAllPassed
+				} else if !os.IsNotExist(err) {
+					return fmt.Errorf("stat lab markdown: %w", err)
+				}
+			}
+
 			passedCount := 0
 			for _, result := range results {
 				if result.Passed {
 					passedCount++
 				}
 			}
+			for _, result := range mcqResults {
+				if result.Passed {
+					passedCount++
+				}
+			}
+			totalCount := len(results) + len(mcqResults)
 
 			if isJSONOutput() {
 				type checkResultJSON struct {
 					Name    string `json:"name"`
 					Passed  bool   `json:"passed"`
 					Message string `json:"message"`
+				}
+				type mcqResultJSON struct {
+					ID      string `json:"id"`
+					Passed  bool   `json:"passed"`
+					Message string `json:"message,omitempty"`
 				}
 				type checkResponseJSON struct {
 					Exercise        string            `json:"exercise"`
@@ -114,12 +149,22 @@ func newCheckCmd() *cobra.Command {
 					Score           int               `json:"score"`
 					PointsAvailable int               `json:"pointsAvailable"`
 					Checks          []checkResultJSON `json:"checks"`
+					MCQs            []mcqResultJSON   `json:"mcqs,omitempty"`
 				}
 
 				jsonChecks := make([]checkResultJSON, 0, len(results))
 				for _, result := range results {
 					jsonChecks = append(jsonChecks, checkResultJSON{
 						Name:    result.Name,
+						Passed:  result.Passed,
+						Message: result.Message,
+					})
+				}
+
+				jsonMCQs := make([]mcqResultJSON, 0, len(mcqResults))
+				for _, result := range mcqResults {
+					jsonMCQs = append(jsonMCQs, mcqResultJSON{
+						ID:      result.ID,
 						Passed:  result.Passed,
 						Message: result.Message,
 					})
@@ -145,10 +190,11 @@ func newCheckCmd() *cobra.Command {
 					Exercise:        exercise.Metadata.Name,
 					AllPassed:       allPassed,
 					PassedCount:     passedCount,
-					TotalCount:      len(results),
+					TotalCount:      totalCount,
 					Score:           score,
 					PointsAvailable: defaultPoints(exercise.Spec.Points),
 					Checks:          jsonChecks,
+					MCQs:            jsonMCQs,
 				}
 				if err := writeJSON(cmd.OutOrStdout(), response); err != nil {
 					return err
@@ -159,16 +205,35 @@ func newCheckCmd() *cobra.Command {
 				return nil
 			}
 
-			progressBar := ProgressBar(passedCount, len(results), 20)
+			progressBar := ProgressBar(passedCount, totalCount, 20)
 			fmt.Fprintln(cmd.OutOrStdout(), progressBar)
 			fmt.Fprintln(cmd.OutOrStdout())
 
-			for _, result := range results {
-				checkLine := FormatCheckResult(result.Name, result.Passed, "")
-				if opts.verbose && result.Message != "" {
-					checkLine = FormatCheckResult(result.Name, result.Passed, result.Message)
+			if len(results) > 0 {
+				if len(mcqResults) > 0 {
+					ColorInfo.Fprintln(cmd.OutOrStdout(), "Practical Checks")
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), checkLine)
+				for _, result := range results {
+					checkLine := FormatCheckResult(result.Name, result.Passed, "")
+					if opts.verbose && result.Message != "" {
+						checkLine = FormatCheckResult(result.Name, result.Passed, result.Message)
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), checkLine)
+				}
+			}
+
+			if len(mcqResults) > 0 {
+				if len(results) > 0 {
+					fmt.Fprintln(cmd.OutOrStdout())
+				}
+				ColorInfo.Fprintln(cmd.OutOrStdout(), "Multiple Choice")
+				for _, result := range mcqResults {
+					checkLine := FormatCheckResult(result.ID, result.Passed, "")
+					if opts.verbose && result.Message != "" {
+						checkLine = FormatCheckResult(result.ID, result.Passed, result.Message)
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), checkLine)
+				}
 			}
 
 			fmt.Fprintln(cmd.OutOrStdout())
@@ -199,7 +264,7 @@ func newCheckCmd() *cobra.Command {
 
 			dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(exercise.Spec.JerryDialog, "onCheckFail", exercise.Metadata.Name))
 			fmt.Fprintln(cmd.OutOrStdout())
-			ColorWarning.Fprintf(cmd.OutOrStdout(), "⚠ Exercise not complete. %d/%d checks passed.\n", passedCount, len(results))
+			ColorWarning.Fprintf(cmd.OutOrStdout(), "⚠ Exercise not complete. %d/%d checks passed.\n", passedCount, totalCount)
 			if !opts.verbose {
 				ColorDim.Fprintln(cmd.OutOrStdout(), "Use --verbose flag for detailed error messages.")
 			}

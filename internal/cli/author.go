@@ -1,18 +1,16 @@
 package cli
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
+
+	"gymctl/internal/scenario"
 )
 
 type authorConfig struct {
@@ -40,12 +38,6 @@ type mcqBlock struct {
 type hashAnswersOptions struct {
 	dryRun bool
 }
-
-var (
-	openFencePattern  = regexp.MustCompile(`^ {0,3}([` + "`" + `~]{3,})(.*)$`)
-	optionLinePattern = regexp.MustCompile(`^(\s*)- \[([ xX])\](.*)$`)
-	idPattern         = regexp.MustCompile(`(^|\s)id=([^\s]+)`)
-)
 
 func newAuthorCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -129,8 +121,8 @@ type hashAnswersResult struct {
 }
 
 func hashMCQAnswers(labData, checksData []byte) (*hashAnswersResult, error) {
-	if !containsCheckedAnswerMarker(labData) {
-		if hasMCQBlocks(labData) {
+	if !scenario.ContainsCheckedAnswerMarker(labData) {
+		if scenario.HasMCQBlocks(labData) {
 			return &hashAnswersResult{Warning: "No [x] markers found in lab.md -- nothing to do"}, nil
 		}
 		return &hashAnswersResult{Warning: "No MCQ blocks found in lab.md -- nothing to do"}, nil
@@ -255,152 +247,34 @@ func collectChecksFiles(root string) ([]string, error) {
 }
 
 func parseMCQBlocks(content []byte) ([]mcqBlock, []byte, error) {
-	lines := splitLines(string(content))
-	rewritten := append([]string(nil), lines...)
-	blocks := []mcqBlock{}
-
-	for i := 0; i < len(lines); i++ {
-		open := openFencePattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r\n"))
-		if open == nil {
-			continue
-		}
-
-		fence := open[1]
-		fenceChar := string(fence[0])
-		fenceLen := len(fence)
-		info := strings.TrimSpace(open[2])
-		if !isMCQInfoString(info) {
-			continue
-		}
-
-		id, ok := parseMCQID(info)
-		if !ok {
-			return nil, nil, fmt.Errorf("mcq block on line %d is missing id=<id>", i+1)
-		}
-
-		optionCount := 0
-		correctCount := 0
-		correctLine := -1
-		correctLetter := ""
-		closed := false
-
-		for j := i + 1; j < len(lines); j++ {
-			currentLine := strings.TrimRight(lines[j], "\r\n")
-			if isClosingFence(currentLine, fenceChar, fenceLen) {
-				closed = true
-				i = j
-				break
-			}
-
-			matches := optionLinePattern.FindStringSubmatch(currentLine)
-			if matches == nil {
-				continue
-			}
-			optionCount++
-			if strings.EqualFold(matches[2], "x") {
-				correctCount++
-				correctLine = j
-				correctLetter = optionLetter(optionCount - 1)
-				rewritten[j] = matches[1] + "- [ ]" + matches[3]
-			}
-		}
-
-		if !closed {
-			return nil, nil, fmt.Errorf("mcq block %q is missing a closing fence", id)
-		}
-		if correctCount == 0 {
-			return nil, nil, fmt.Errorf("mcq block %q has no correct answer", id)
-		}
-		if correctCount > 1 {
-			return nil, nil, fmt.Errorf("mcq block %q has multiple correct answers", id)
-		}
-
-		blocks = append(blocks, mcqBlock{
-			ID:          id,
-			StartLine:   i + 1,
-			CorrectLine: correctLine + 1,
-			OptionCount: optionCount,
-			Letter:      correctLetter,
-		})
+	parsedBlocks, rewritten, err := scenario.ParseAndClearMCQMarkdownSelections(content)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	return blocks, []byte(strings.Join(rewritten, "")), nil
-}
-
-func hasMCQBlocks(content []byte) bool {
-	lines := splitLines(string(content))
-	for _, line := range lines {
-		open := openFencePattern.FindStringSubmatch(strings.TrimRight(line, "\r\n"))
-		if open == nil {
-			continue
-		}
-		if isMCQInfoString(strings.TrimSpace(open[2])) {
-			return true
+	blocks := make([]mcqBlock, 0, len(parsedBlocks))
+	for _, block := range parsedBlocks {
+		switch len(block.SelectedLetters) {
+		case 0:
+			return nil, nil, fmt.Errorf("mcq block %q has no correct answer", block.ID)
+		case 1:
+			blocks = append(blocks, mcqBlock{
+				ID:          block.ID,
+				StartLine:   block.StartLine,
+				CorrectLine: 0,
+				OptionCount: block.OptionCount,
+				Letter:      block.SelectedLetters[0],
+			})
+		default:
+			return nil, nil, fmt.Errorf("mcq block %q has multiple correct answers", block.ID)
 		}
 	}
-	return false
-}
 
-func containsCheckedAnswerMarker(content []byte) bool {
-	return bytes.Contains(content, []byte("[x]")) || bytes.Contains(content, []byte("[X]"))
-}
-
-func splitLines(content string) []string {
-	if content == "" {
-		return []string{}
-	}
-	parts := strings.SplitAfter(content, "\n")
-	if !strings.HasSuffix(content, "\n") {
-		return parts
-	}
-	return parts[:len(parts)-1]
-}
-
-func isMCQInfoString(info string) bool {
-	fields := strings.Fields(info)
-	if len(fields) == 0 || fields[0] != "mcq" {
-		return false
-	}
-	return true
-}
-
-func parseMCQID(info string) (string, bool) {
-	matches := idPattern.FindStringSubmatch(info)
-	if len(matches) != 3 {
-		return "", false
-	}
-	return matches[2], true
-}
-
-func isClosingFence(line, fenceChar string, fenceLen int) bool {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, fenceChar) {
-		return false
-	}
-	count := 0
-	for count < len(trimmed) && trimmed[count] == fenceChar[0] {
-		count++
-	}
-	if count < fenceLen {
-		return false
-	}
-	return strings.TrimSpace(trimmed[count:]) == ""
-}
-
-func optionLetter(idx int) string {
-	idx++
-	letters := ""
-	for idx > 0 {
-		idx--
-		letters = string(rune('A'+(idx%26))) + letters
-		idx /= 26
-	}
-	return letters
+	return blocks, rewritten, nil
 }
 
 func hashAnswer(id, letter string) string {
-	sum := sha256.Sum256([]byte(id + ":" + letter))
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return scenario.HashMCQAnswer(id, letter)
 }
 
 func rewriteChecksYAML(content []byte, answers []mcqAnswer) ([]byte, error) {

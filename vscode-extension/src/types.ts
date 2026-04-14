@@ -45,13 +45,21 @@ export interface CheckResult {
   message: string;
 }
 
+export interface MCQResult {
+  id: string;
+  passed: boolean;
+  message?: string;
+}
+
 export interface CheckResponse {
   exercise: string;
   allPassed: boolean;
   passedCount: number;
   totalCount: number;
   score: number;
+  pointsAvailable: number;
   checks: CheckResult[];
+  mcqs?: MCQResult[];
 }
 
 export interface HintResponse {

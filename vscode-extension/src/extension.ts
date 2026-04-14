@@ -124,11 +124,24 @@ class LabTreeProvider implements vscode.TreeDataProvider<LabItem> {
     }
 
     if (this.lastCheck && this.lastCheck.exercise === activeName) {
-      for (const check of this.lastCheck.checks) {
-        const icon = check.passed ? "$(pass-filled)" : "$(error)";
-        const label = check.message ? `${icon} ${check.name}: ${check.message}` : `${icon} ${check.name}`;
-        items.push(new LabItem(label, vscode.TreeItemCollapsibleState.None, "check"));
+      if (this.lastCheck.checks.length > 0) {
+        items.push(new LabItem("Practical Checks", vscode.TreeItemCollapsibleState.None, "info"));
+        for (const check of this.lastCheck.checks) {
+          const icon = check.passed ? "$(pass-filled)" : "$(error)";
+          const label = check.message ? `${icon} ${check.name}: ${check.message}` : `${icon} ${check.name}`;
+          items.push(new LabItem(label, vscode.TreeItemCollapsibleState.None, "check"));
+        }
       }
+
+      if (this.lastCheck.mcqs && this.lastCheck.mcqs.length > 0) {
+        items.push(new LabItem("Multiple Choice", vscode.TreeItemCollapsibleState.None, "info"));
+        for (const mcq of this.lastCheck.mcqs) {
+          const icon = mcq.passed ? "$(pass-filled)" : "$(error)";
+          const label = mcq.message ? `${icon} ${mcq.id}: ${mcq.message}` : `${icon} ${mcq.id}`;
+          items.push(new LabItem(label, vscode.TreeItemCollapsibleState.None, "check"));
+        }
+      }
+
       items.push(
         new LabItem(
           `${this.lastCheck.passedCount}/${this.lastCheck.totalCount} checks passing`,
