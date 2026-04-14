@@ -29,6 +29,16 @@ class LabItem extends vscode.TreeItem {
   }
 }
 
+function normalizeExerciseName(value: string | LabItem | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return value.exerciseName;
+}
+
 class LabTreeProvider implements vscode.TreeDataProvider<LabItem> {
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<LabItem | void>();
   readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
@@ -95,17 +105,13 @@ class LabTreeProvider implements vscode.TreeDataProvider<LabItem> {
     }
 
     return this.exercises.map((ex) => {
-      const statusIcon =
-        ex.status === "completed"
-          ? "$(check)"
-          : ex.status === "in-progress"
-            ? "$(circle-large-filled)"
-            : "$(circle-outline)";
-      const lock = ex.locked ? " $(lock-small)" : "";
-      const item = new LabItem(`${statusIcon} ${ex.name}${lock}`, vscode.TreeItemCollapsibleState.None, "exercise", undefined, ex.name);
+      const item = new LabItem(ex.name, vscode.TreeItemCollapsibleState.None, "exercise", undefined, ex.name);
       item.description = ex.difficulty;
       item.tooltip = ex.title;
       item.contextValue = "exercise";
+      item.iconPath = ex.locked
+        ? new vscode.ThemeIcon("lock-small")
+        : new vscode.ThemeIcon(ex.status === "completed" ? "check" : ex.status === "in-progress" ? "circle-large-filled" : "circle-outline");
       return item;
     });
   }
@@ -240,11 +246,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const terminal = vscode.window.createTerminal({ name: "gymctl" });
       terminal.show();
     }),
-    vscode.commands.registerCommand("gymctl.openLab", async (exerciseName?: string) => {
+    vscode.commands.registerCommand("gymctl.openLab", async (exerciseArg?: string | LabItem) => {
       if (detection.mode === "none") {
         vscode.window.showWarningMessage("No lab detected.");
         return;
       }
+
+      const exerciseName = normalizeExerciseName(exerciseArg);
 
       const describe = await loadDescribeResponse(provider, detection, exerciseName);
       if (!describe) {
@@ -313,12 +321,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       labPanelState = { exerciseName: resolvedExerciseName, describe };
       labPanel.webview.html = renderLabWebview(labPanel.webview, describe, provider.lastCheck);
     }),
-    vscode.commands.registerCommand("gymctl.setActive", async (exerciseName?: string) => {
+    vscode.commands.registerCommand("gymctl.setActive", async (exerciseArg?: string | LabItem) => {
       if (detection.mode !== "gymctl") {
         return;
       }
 
-      let target = exerciseName;
+      let target = normalizeExerciseName(exerciseArg);
       if (!target) {
         const pick = await vscode.window.showQuickPick(
           provider.exercises.map((ex) => ({ label: ex.name, description: ex.title, picked: ex.name === provider.currentExercise })),
@@ -339,11 +347,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       await refreshState(provider, detection);
     }),
-    vscode.commands.registerCommand("gymctl.runChecks", async (exerciseName?: string) => {
+    vscode.commands.registerCommand("gymctl.runChecks", async (exerciseArg?: string | LabItem) => {
       if (detection.mode === "none") {
         vscode.window.showWarningMessage("No lab detected.");
         return;
       }
+
+      const exerciseName = normalizeExerciseName(exerciseArg);
 
       const args = ["check"];
       if (detection.mode === "coder-lab" && detection.specPath) {
