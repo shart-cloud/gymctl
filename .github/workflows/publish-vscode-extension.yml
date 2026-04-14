@@ -28,19 +28,21 @@ jobs:
       - name: Read extension metadata
         id: meta
         run: |
-          echo "name=$(node -p \"require('./vscode-extension/package.json').name\")" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p \"require('./vscode-extension/package.json').version\")" >> "$GITHUB_OUTPUT"
-          echo "publisher=$(node -p \"require('./vscode-extension/package.json').publisher\")" >> "$GITHUB_OUTPUT"
+          name=$(node -p "require('./vscode-extension/package.json').name")
+          version=$(node -p "require('./vscode-extension/package.json').version")
+          publisher=$(node -p "require('./vscode-extension/package.json').publisher")
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publisher=$publisher" >> "$GITHUB_OUTPUT"
 
       - name: Build VSIX
+        working-directory: vscode-extension
         run: |
-          mkdir -p dist
-          npm ci --prefix vscode-extension
-          npm run compile --prefix vscode-extension
-          npx --yes @vscode/vsce package \
-            --cwd vscode-extension \
-            --out "../dist/${{ steps.meta.outputs.name }}-${{ steps.meta.outputs.version }}.vsix" \
-            --allow-missing-repository
+          mkdir -p ../dist
+          npm ci
+          npm run compile
+          npx --yes @vscode/vsce package --allow-missing-repository
+          mv "${{ steps.meta.outputs.name }}-${{ steps.meta.outputs.version }}.vsix" ../dist/
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
