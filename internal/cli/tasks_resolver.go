@@ -10,12 +10,13 @@ import (
 )
 
 // resolveTasksDirectories finds the tasks directory list in this order:
-// 1. Explicitly set via --tasks-dir flag (comma-separated)
-// 2. GYMCTL_TASKS_DIRS env var (comma-separated)
-// 2. Local ./tasks directory (for development)
-// 3. System-wide installation at /usr/share/gymctl/tasks
-// 4. User's home directory at ~/.gym/tasks
-// 5. Bundled with binary at <binary-dir>/tasks
+//  1. Explicitly set via --tasks-dir flag (comma-separated)
+//  2. GYMCTL_TASKS_DIRS env var (comma-separated)
+//     GYMCTL_TASKS_DIR is also accepted as a compatibility fallback
+//  2. Local ./tasks directory (for development)
+//  3. System-wide installation at /usr/share/gymctl/tasks
+//  4. User's home directory at ~/.gym/tasks
+//  5. Bundled with binary at <binary-dir>/tasks
 func resolveTasksDirectories() ([]string, error) {
 	// 1. Check if explicitly set
 	if dirs := parseTasksDirList(tasksDir); len(dirs) > 0 && tasksDir != "tasks" {
@@ -31,6 +32,12 @@ func resolveTasksDirectories() ([]string, error) {
 			return nil, err
 		}
 		return dirs, nil
+	}
+	if dir := strings.TrimSpace(os.Getenv("GYMCTL_TASKS_DIR")); dir != "" {
+		if err := validateTasksDirectories([]string{dir}); err != nil {
+			return nil, err
+		}
+		return []string{dir}, nil
 	}
 
 	// 3. Check local directory (development mode)

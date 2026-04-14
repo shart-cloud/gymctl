@@ -5,7 +5,8 @@ Private VS Code extension for gymctl-driven labs in Coder workspaces.
 ## Features
 
 - Detects workspace mode:
-  - `GYMCTL_TASKS_DIR`
+  - `GYMCTL_TASKS_DIRS` (preferred)
+  - `GYMCTL_TASKS_DIR` (compatibility fallback)
   - `./tasks`
   - `~/.coder/lab-spec.yaml` (with startup retry)
 - Sidebar panel with sections for Exercises, Active checks, Hints, and Progress

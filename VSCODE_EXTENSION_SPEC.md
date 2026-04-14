@@ -308,10 +308,11 @@ Display name: **Lab Companion**
 
 On activation, the extension runs detection in order:
 
-1. Check `GYMCTL_TASKS_DIR` environment variable — if set, use that path as the tasks directory
-2. Check for `./tasks/` directory in the workspace root — gymctl mode
-3. Check for `~/.coder/lab-spec.yaml` — coder-lab mode
-4. Neither found → extension stays silent; shows "No lab detected" in the panel with a setup link
+1. Check `GYMCTL_TASKS_DIRS` environment variable — if set, use the first path as the tasks directory
+2. Check `GYMCTL_TASKS_DIR` as a compatibility fallback
+3. Check for `./tasks/` directory in the workspace root — gymctl mode
+4. Check for `~/.coder/lab-spec.yaml` — coder-lab mode
+5. Neither found → extension stays silent; shows "No lab detected" in the panel with a setup link
 
 Detection runs once at activation. If the workspace is freshly provisioned and the startup script hasn't finished yet, the extension should retry detection up to 3 times with a 3-second delay before giving up. In practice this matters most for coder-lab mode where `lab-spec.yaml` is written by the startup script.
 

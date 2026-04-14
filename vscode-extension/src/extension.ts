@@ -75,7 +75,7 @@ class LabTreeProvider implements vscode.TreeDataProvider<LabItem> {
     if (this.mode === "none") {
       return [
         new LabItem("No lab detected", vscode.TreeItemCollapsibleState.None, "info"),
-        new LabItem("Set GYMCTL_TASKS_DIR, add ./tasks, or provide ~/.coder/lab-spec.yaml", vscode.TreeItemCollapsibleState.None, "info"),
+        new LabItem("Set GYMCTL_TASKS_DIRS, add ./tasks, or provide ~/.coder/lab-spec.yaml", vscode.TreeItemCollapsibleState.None, "info"),
       ];
     }
 
@@ -331,7 +331,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
 
-      const result = await execGymctl(["start", target]);
+      const result = await execGymctl(["start", target], detection);
       if (result.code !== 0) {
         vscode.window.showErrorMessage(result.stderr || `Failed to set active exercise: ${target}`);
         return;
@@ -360,7 +360,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: "Running gymctl checks..." },
         async () => {
-          const result = await execGymctl(args);
+          const result = await execGymctl(args, detection);
           const parsed = parseJSON<CheckResponse>(result.stdout);
           if (!parsed) {
             vscode.window.showErrorMessage(result.stderr || "gymctl output was not valid JSON.");
@@ -392,7 +392,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       args.push("--output", "json");
 
-      const result = await execGymctl(args);
+      const result = await execGymctl(args, detection);
       const parsed = parseJSON<HintResponse>(result.stdout);
       if (!parsed) {
         vscode.window.showErrorMessage(result.stderr || "gymctl hint output was not valid JSON.");
@@ -430,14 +430,14 @@ async function refreshState(provider: LabTreeProvider, detection: DetectionResul
   }
 
   if (detection.mode === "gymctl") {
-    const listResult = await execGymctl(["list", "--output", "json"]);
+    const listResult = await execGymctl(["list", "--output", "json"], detection);
     const list = parseJSON<ListResponse>(listResult.stdout);
     if (list) {
       provider.exercises = list.exercises;
       provider.listSummary = list.summary;
     }
 
-    const statusResult = await execGymctl(["status", "--output", "json"]);
+    const statusResult = await execGymctl(["status", "--output", "json"], detection);
     const status = parseJSON<StatusResponse>(statusResult.stdout);
     if (status) {
       provider.currentExercise = status.current;
@@ -467,7 +467,7 @@ async function loadDescribeResponse(
     }
   }
 
-  const result = await execGymctl(args);
+  const result = await execGymctl(args, detection);
   const parsed = parseJSON<DescribeResponse>(result.stdout);
   if (!parsed) {
     vscode.window.showErrorMessage(result.stderr || "gymctl describe output was not valid JSON.");
@@ -494,7 +494,7 @@ async function runChecksForExercise(
   }
   args.push("--output", "json");
 
-  const result = await execGymctl(args);
+  const result = await execGymctl(args, detection);
   const parsed = parseJSON<CheckResponse>(result.stdout);
   if (!parsed) {
     if (result.stderr) {
@@ -1063,9 +1063,17 @@ function escapeHtml(value: string): string {
 }
 
 async function detectWorkspace(): Promise<DetectionResult> {
-  const envTasksDir = process.env.GYMCTL_TASKS_DIR?.trim();
-  if (envTasksDir) {
-    return { mode: "gymctl", tasksDir: envTasksDir };
+  const envTasksDirs = process.env.GYMCTL_TASKS_DIRS?.trim();
+  if (envTasksDirs) {
+    const tasksDir = envTasksDirs.split(",").map((part) => part.trim()).find(Boolean);
+    if (tasksDir) {
+      return { mode: "gymctl", tasksDir };
+    }
+  }
+
+  const legacyTasksDir = process.env.GYMCTL_TASKS_DIR?.trim();
+  if (legacyTasksDir) {
+    return { mode: "gymctl", tasksDir: legacyTasksDir };
   }
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -1110,9 +1118,15 @@ function parseJSON<T>(raw: string): T | null {
   }
 }
 
-async function execGymctl(args: string[]): Promise<ExecResult> {
+async function execGymctl(args: string[], detection?: DetectionResult): Promise<ExecResult> {
   return new Promise((resolve) => {
-    const child = spawn("gymctl", args, { env: process.env });
+    const workspaceCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const childEnv = { ...process.env };
+    const childArgs = withDetectionArgs(args, detection, childEnv);
+    const child = spawn("gymctl", childArgs, {
+      env: childEnv,
+      cwd: workspaceCwd,
+    });
     let stdout = "";
     let stderr = "";
 
@@ -1130,6 +1144,17 @@ async function execGymctl(args: string[]): Promise<ExecResult> {
       resolve({ code: 1, stdout: "", stderr: err.message });
     });
   });
+}
+
+function withDetectionArgs(args: string[], detection: DetectionResult | undefined, env: NodeJS.ProcessEnv): string[] {
+  if (detection?.mode !== "gymctl" || !detection.tasksDir) {
+    return args;
+  }
+
+  if (!env.GYMCTL_TASKS_DIRS?.trim()) {
+    env.GYMCTL_TASKS_DIRS = detection.tasksDir;
+  }
+  return ["--tasks-dir", detection.tasksDir, ...args];
 }
 
 async function readSpecTitle(specPath?: string): Promise<string | null> {

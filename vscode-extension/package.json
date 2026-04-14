@@ -2,7 +2,7 @@
   "name": "gymctl-lab-companion",
   "displayName": "Lab Companion",
   "description": "VS Code sidebar for gymctl labs",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "publisher": "shart-cloud",
   "engines": {
     "vscode": "^1.90.0"
