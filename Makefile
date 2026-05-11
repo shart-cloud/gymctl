@@ -6,6 +6,8 @@ BUILD_DIR=build
 CMD_PATH=cmd/gymctl
 GO=go
 GOFLAGS=-v
+INSTALL_BIN_DIR ?= $(if $(GOPATH),$(GOPATH)/bin,$(HOME)/go/bin)
+INSTALL_SHARE_DIR ?= /usr/share/gymctl
 
 # Version info
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -95,8 +97,10 @@ tidy:
 # Install the binary to GOPATH/bin
 .PHONY: install
 install: build
-	@echo "Installing $(BINARY_NAME) to GOPATH/bin..."
-	@cp $(BUILD_DIR)/$(BINARY_NAME) $(GOPATH)/bin/
+	@echo "Installing $(BINARY_NAME) to $(INSTALL_BIN_DIR)..."
+	@install -d "$(INSTALL_BIN_DIR)" "$(INSTALL_SHARE_DIR)/shell"
+	@install -m 0755 $(BUILD_DIR)/$(BINARY_NAME) "$(INSTALL_BIN_DIR)/$(BINARY_NAME)"
+	@install -m 0644 shell/gymctl.sh "$(INSTALL_SHARE_DIR)/shell/gymctl.sh"
 
 # Cross-compilation targets
 .PHONY: build-linux

@@ -21,6 +21,7 @@ import (
 type startOptions struct {
 	noCluster bool
 	provider  string
+	emitCD    bool
 }
 
 func newStartCmd() *cobra.Command {
@@ -175,13 +176,20 @@ func newStartCmd() *cobra.Command {
 				return err
 			}
 
-			// Create and show work directory
-			workDir, err := resolveWorkDir(exercise.Metadata.Name)
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(workDir, 0o755); err != nil {
-				return fmt.Errorf("create work directory: %w", err)
+			// Resolve work directory based on environment type.
+			workDir := ""
+			switch exercise.Spec.Environment.Type {
+			case "local":
+				workDir = entry.Dir
+			default:
+				resolved, err := resolveWorkDir(exercise.Metadata.Name)
+				if err != nil {
+					return err
+				}
+				workDir = resolved
+				if err := os.MkdirAll(workDir, 0o755); err != nil {
+					return fmt.Errorf("create work directory: %w", err)
+				}
 			}
 
 			// Copy files if Docker environment specifies copyFiles
@@ -203,11 +211,19 @@ func newStartCmd() *cobra.Command {
 
 			// Print work directory info
 			fmt.Fprintln(cmd.OutOrStdout(), "")
-			fmt.Fprintf(cmd.OutOrStdout(), "Work directory: %s\n", workDir)
+			if exercise.Spec.Environment.Type == "local" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Task directory: %s\n", workDir)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "Work directory: %s\n", workDir)
+				fmt.Fprintln(cmd.OutOrStdout(), "")
+				fmt.Fprintln(cmd.OutOrStdout(), "To navigate to your work directory, run:")
+				fmt.Fprintf(cmd.OutOrStdout(), "  cd %s\n", workDir)
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), "")
-			fmt.Fprintln(cmd.OutOrStdout(), "To navigate to your work directory, run:")
-			fmt.Fprintf(cmd.OutOrStdout(), "  cd %s\n", workDir)
-			fmt.Fprintln(cmd.OutOrStdout(), "")
+
+			if opts.emitCD {
+				fmt.Fprintf(cmd.OutOrStdout(), "__gymctl_cd:%s\n", workDir)
+			}
 
 			return nil
 		},
@@ -215,6 +231,8 @@ func newStartCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&opts.noCluster, "no-cluster", false, "Skip kubernetes cluster creation")
 	cmd.Flags().StringVar(&opts.provider, "provider", "", "Override kubernetes backend provider (kind or vagrant)")
+	cmd.Flags().BoolVar(&opts.emitCD, "emit-cd", false, "Emit __gymctl_cd directive for shell wrapper")
+	_ = cmd.Flags().MarkHidden("emit-cd")
 
 	return cmd
 }

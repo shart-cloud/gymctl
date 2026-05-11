@@ -81,12 +81,15 @@ func newCheckCmd() *cobra.Command {
 			}
 
 			workDir := ""
-			if exercise.Spec.Environment.Type == "docker" {
+			switch exercise.Spec.Environment.Type {
+			case "docker":
 				resolved, err := resolveWorkDir(exercise.Metadata.Name)
 				if err != nil {
 					return err
 				}
 				workDir = resolved
+			case "local":
+				workDir = exerciseDir
 			}
 			if !isJSONOutput() {
 				ColorInfo.Fprintf(cmd.OutOrStdout(), "🔍 Checking: %s\n", exercise.Metadata.Name)

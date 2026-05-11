@@ -5,6 +5,7 @@ set -e
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 TASKS_DIR="${TASKS_DIR:-$HOME/.gym/tasks}"
+SHELL_DIR="${SHELL_DIR:-/usr/share/gymctl/shell}"
 REPO_URL="https://github.com/shart/container-course"
 
 echo "Installing gymctl..."
@@ -28,6 +29,10 @@ fi
 # Make it executable
 chmod +x "$INSTALL_DIR/gymctl"
 
+# Install shell wrapper
+mkdir -p "$SHELL_DIR"
+install -m 0644 "shell/gymctl.sh" "$SHELL_DIR/gymctl.sh"
+
 # Download exercise files
 if [ ! -d "$TASKS_DIR" ]; then
     echo "Downloading exercise files to $TASKS_DIR..."
@@ -50,6 +55,7 @@ echo "Installation complete!"
 echo ""
 echo "Exercises installed at: $TASKS_DIR"
 echo "Binary installed at: $INSTALL_DIR/gymctl"
+echo "Shell wrapper installed at: $SHELL_DIR/gymctl.sh"
 echo ""
 echo "To get started:"
 echo "  gymctl list                    # List available exercises"
