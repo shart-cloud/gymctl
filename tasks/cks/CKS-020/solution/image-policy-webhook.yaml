@@ -1,0 +1,46 @@
+# The one object the learner authors. It wires the cluster's admission chain to
+# the pre-built backend Service (policy-system/image-policy) and enforces the
+# trusted-image policy on pod CREATE and UPDATE.
+#
+# apply with:  kubectl apply -f solution/
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: image-policy-webhook
+webhooks:
+  - name: image-policy.policy-system.svc
+    # v1 is the only AdmissionReview version the backend speaks.
+    admissionReviewVersions: ["v1"]
+    # The backend has no side effects (it only reads and decides), so dry-run is safe.
+    sideEffects: None
+    # Fail CLOSED: if the backend is unreachable or the caBundle does not match the
+    # serving cert, admission is DENIED. Safe here only because the backend is live
+    # and policy-system is excluded (so the webhook can never block its own backend).
+    failurePolicy: Fail
+    # Only pod CREATE and UPDATE are validated. Matching the backend's remit keeps
+    # the blast radius tight and avoids validating unrelated resources.
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+        scope: "Namespaced"
+    clientConfig:
+      service:
+        namespace: policy-system
+        name: image-policy
+        path: /validate
+        port: 8443
+      # Static CA of the fixed lab certs. MUST match the CA that signed the
+      # backend's serving cert (the tls.crt in setup/), or the TLS handshake fails
+      # and — under failurePolicy: Fail — every pod create is blocked.
+      caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURIVENDQWdXZ0F3SUJBZ0lVV2NaaHRzb3M2RWRrR3h3Y0tpQVBmdFExbGhNd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0hqRWNNQm9HQTFVRUF3d1RhVzFoWjJVdGNHOXNhV041TFd4aFlpMWpZVEFlRncweU5qQTNNRGt5TVRRegpNakphRncwek5qQTNNRFl5TVRRek1qSmFNQjR4SERBYUJnTlZCQU1NRTJsdFlXZGxMWEJ2YkdsamVTMXNZV0l0ClkyRXdnZ0VpTUEwR0NTcUdTSWIzRFFFQkFRVUFBNElCRHdBd2dnRUtBb0lCQVFEa2J4NTJhN3lUaGF6ZE5sZlEKY3VocG85YXQzWUZWbmFVemlRNTdDekMvTTRzbmNJOGJ6YTZVQmNqYXpkSmxKTjk4R2VvUThMWnVFRXFZc25LagpKRkQwcTE2eDF4UWJpN0lvYkN3ZWFlV3pDMVNrMEVic2NEWDlJTyt5M0RDdjBscTNUVUhNeU9LKzFsTTdxRkluClBHUkR0RkpTSXhCSGoydVlDbFBEcnc5Y09tbnZMbmZhK1NldFM4ZHUxbW5ydzVwZmU0OXcxSWpVemZOTjVGVzYKU0w2RFNwZkZ6SG5TamRMNEU5L3dGMXpBbnRPYWhxbkszZTB1dWJIOEVETURwQ0hRMUFpMHJPYzVkelFyUyt2QgpENE1mRE92RTY4UG80bXpiODJaREUxOTFLZEhZRGVSUmJxQkdmRlJpb0NlRjhlbzFKZ2tiTWQrUjIvMkt3S3JuCngzK0xBZ01CQUFHalV6QlJNQjBHQTFVZERnUVdCQlJuZktOMDJDZ05xaFd5TWsrWWkyekhsRHlMNmpBZkJnTlYKSFNNRUdEQVdnQlJuZktOMDJDZ05xaFd5TWsrWWkyekhsRHlMNmpBUEJnTlZIUk1CQWY4RUJUQURBUUgvTUEwRwpDU3FHU0liM0RRRUJDd1VBQTRJQkFRREZ2SmJKZDJIZkEydFVuR1MvQzR3MjJzYk9UODdLNFpGVlFNUFlWVGN1Ck8wcWJLa1NVZWZPRE85eUJVcE5wV0hoczJWNXpuQ2s5aDUxWGZIbW53RGx3ak5kOWFjT1dUSE5LL3dJTDUzeGIKQkhzRk9GdTZUY1U2QnhadlViTzlMb1BiSUtWNGYzbWZsTjR6eWo5ZENCaVlQVnRaSUtiUncxVGJlVXp5cXFMQgplRUpuRnlMRW5ldlplQzZ1d05zT2xJMGJWZVVpRjloRzM2SFEwbjFwY3p6YWdiNk9wL3BKTjViWENDYm82MHZFCjhycUtmUVBlK1RaTi9PalJORUJuMjVEWUN0OEw2MVFMTXNqUlhlMU44SlJFRkpoZ2V0VS9xQkFaU1E2QzhMM2QKOElJSmFXQmpKREhZQ2Ezc1JWNkY4cFlkMUR1ZW9VZzR4eFgzL0VubldiZlEKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    # Exclude kube-system (control-plane pods) AND policy-system (the backend
+    # itself). Excluding policy-system prevents a deadlock: if the webhook vetted
+    # its own backend's pods and the backend were down, failurePolicy: Fail would
+    # block the backend from ever coming back up.
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kube-system", "policy-system"]

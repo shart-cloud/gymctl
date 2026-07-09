@@ -1,0 +1,15 @@
+# The namespace that hosts the image-admission backend. It is deliberately the
+# ONE namespace (besides kube-system) the learner must exclude from the webhook:
+# if the webhook validated pods here too, and the backend ever restarted, the
+# webhook would block its own backend from starting — a self-inflicted deadlock
+# under failurePolicy: Fail.
+#
+# Kubernetes auto-stamps `kubernetes.io/metadata.name: policy-system` on every
+# namespace (NamespaceDefaultLabelName admission), which is what the solution's
+# namespaceSelector keys off. It is set explicitly here for clarity.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: policy-system
+  labels:
+    kubernetes.io/metadata.name: policy-system

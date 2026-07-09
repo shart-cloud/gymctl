@@ -1,0 +1,52 @@
+# Least-privilege replacement for cluster-admin.
+#
+# A read-only dashboard only needs to LOOK at cluster objects, so this
+# ClusterRole grants get/list/watch (no create/update/delete, no wildcards, and
+# crucially NO secrets) on the resources such a dashboard renders. The
+# ClusterRoleBinding wires it to the dashboard ServiceAccount.
+#
+# This does NOT remove the old cluster-admin binding — `kubectl apply` cannot
+# delete objects. You must delete that binding yourself (see README.md):
+#   kubectl delete clusterrolebinding dashboard-cluster-admin
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dashboard-viewer
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+      - namespaces
+      - nodes
+      - configmaps
+      - endpoints
+      - events
+      - persistentvolumeclaims
+      - replicationcontrollers
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-viewer
+subjects:
+  - kind: ServiceAccount
+    name: dashboard
+    namespace: kubernetes-dashboard
+roleRef:
+  kind: ClusterRole
+  name: dashboard-viewer
+  apiGroup: rbac.authorization.k8s.io

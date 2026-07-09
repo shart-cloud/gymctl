@@ -1,0 +1,31 @@
+# Proof that NOTHING stops bad images today. This Deployment runs `nginx:latest`
+# — an untrusted Docker Hub source AND the floating ':latest' tag, two policy
+# violations at once — in the (non-excluded) default namespace, and it is happily
+# Running because no ValidatingWebhookConfiguration is wired up yet.
+#
+# Note: admission control is forward-looking. Once the learner installs the
+# webhook, this already-running pod is NOT evicted; only NEW pod creates are
+# vetted. That is expected — the exercise proves enforcement with fresh
+# (dry-run) creates, not by killing this demonstrator.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-nginx
+  namespace: default
+  labels:
+    app: legacy-nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: legacy-nginx
+  template:
+    metadata:
+      labels:
+        app: legacy-nginx
+    spec:
+      containers:
+        - name: web
+          image: nginx:latest
+          ports:
+            - containerPort: 80

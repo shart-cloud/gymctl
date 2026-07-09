@@ -1,0 +1,30 @@
+# The patched Ingress. Two changes vs. the broken one:
+#   1. A tls: block binds the dashboard-tls Secret to host dashboard.lab.local,
+#      so ingress-nginx terminates HTTPS with our cert instead of serving plain
+#      HTTP (or its built-in fake default certificate).
+#   2. force-ssl-redirect makes plain HTTP answer 308 -> https, so nobody can
+#      talk to the dashboard in the clear even if they try port 80.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dashboard
+  namespace: kubernetes-dashboard
+  annotations:
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - dashboard.lab.local
+      secretName: dashboard-tls
+  rules:
+    - host: dashboard.lab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard
+                port:
+                  number: 80

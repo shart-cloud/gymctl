@@ -1,0 +1,13 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sDenyPrivileged
+metadata:
+  name: deny-privileged
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    # Enforce everywhere EXCEPT kube-system, where the control plane legitimately
+    # runs privileged system pods.
+    excludedNamespaces:
+      - kube-system

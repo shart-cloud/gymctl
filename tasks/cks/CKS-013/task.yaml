@@ -12,15 +12,39 @@ spec:
   difficulty: intermediate
   estimatedTime: 35m
   points: 140
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Gatekeeper is installed. Create constraints to deny privileged containers outside kube-system and require an `owner` label for pods in app/staging. Verify non-compliant pods are rejected and compliant pods succeed.
+    OPA Gatekeeper is installed and running in `gatekeeper-system`, but the
+    cluster has zero Constraints — the admission webhook is enforcing nothing.
+    A leftover `legacy-app` pod in the `app` namespace proves it: it is both
+    privileged AND missing an `owner` label, yet it was admitted without
+    complaint.
+
+    Author Gatekeeper policy so that NEW pods are held to two rules:
+
+      1. **No privileged containers** (`securityContext.privileged: true`),
+         anywhere EXCEPT `kube-system`, where the control plane legitimately
+         runs privileged system pods.
+      2. **An `owner` label is required** on pods in the `app` and `staging`
+         namespaces.
+
+    Non-compliant pods must be REJECTED at admission; compliant pods must still
+    be admitted. You will need, for each rule, a `ConstraintTemplate` (the Rego)
+    plus a `Constraint` (where it applies).
+
+    Gatekeeper gotcha: a `Constraint` is a custom resource whose CRD is created
+    by its `ConstraintTemplate`. Apply the templates first, let their CRDs
+    become established, then apply the Constraints (see `solution/README.md`).
+    There is also a short propagation delay after a Constraint is created before
+    the webhook enforces it — the checks account for that by retrying.
 
   learningOutcomes:
-    - "Practice CKS domain: Minimize Microservice Vulnerabilities"
-    - "Apply concepts: OPA Gatekeeper, ConstraintTemplate, Constraint, Rego"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Minimize Microservice Vulnerabilities — policy-as-code admission control"
+    - "Write a ConstraintTemplate with valid Rego and a matching Constraint"
+    - "Scope a Constraint with match.namespaces and exclude with match.excludedNamespaces"
+    - "Parameterize a required-label policy instead of hard-coding the key"
+    - "Verify real admission enforcement: bad pods rejected, good pods admitted"
 
   tags:
     - "cks"
@@ -32,31 +56,131 @@ spec:
     - "constraint"
     - "rego"
 
-
   environment:
     type: kubernetes
     kubernetes:
       provider: kind
       createCluster: true
-      namespace: default
+      namespace: app
+    customSetup:
+      # Install OPA Gatekeeper (pinned) and wait for the webhook to be serving.
+      - type: script
+        timeout: 300s
+        script: |
+          set -euo pipefail
+          echo "Installing OPA Gatekeeper v3.15.1 (the admission webhook)..."
+          kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper/v3.15.1/deploy/gatekeeper.yaml
+          kubectl -n gatekeeper-system rollout status deploy/gatekeeper-controller-manager --timeout=240s
+          kubectl -n gatekeeper-system rollout status deploy/gatekeeper-audit --timeout=120s
+      # Create the target namespaces and the intentionally non-compliant pod.
+      - type: script
+        timeout: 120s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/namespaces.yaml
+          kubectl apply -f setup/workloads.yaml
+          echo "Namespaces app/staging created; legacy-app (privileged, unlabeled) admitted with no policy in force."
 
   checks:
-    - name: "Executable lab checks implemented"
+    # --- Structural: privileged policy ---
+    - name: "ConstraintTemplate k8sdenyprivileged exists"
+      type: resourceExists
+      resource: constrainttemplate/k8sdenyprivileged
+
+    - name: "Constraint deny-privileged exists"
+      type: resourceExists
+      resource: k8sdenyprivileged/deny-privileged
+
+    - name: "deny-privileged excludes kube-system"
+      type: jsonpath
+      resource: k8sdenyprivileged/deny-privileged
+      jsonpath: "{.spec.match.excludedNamespaces}"
+      operator: contains
+      value: kube-system
+
+    # --- Structural: required-label policy ---
+    - name: "ConstraintTemplate k8srequiredlabels exists"
+      type: resourceExists
+      resource: constrainttemplate/k8srequiredlabels
+
+    - name: "Constraint require-owner-label exists"
+      type: resourceExists
+      resource: k8srequiredlabels/require-owner-label
+
+    - name: "require-owner-label scopes to app namespace"
+      type: jsonpath
+      resource: k8srequiredlabels/require-owner-label
+      jsonpath: "{.spec.match.namespaces}"
+      operator: contains
+      value: app
+
+    - name: "require-owner-label scopes to staging namespace"
+      type: jsonpath
+      resource: k8srequiredlabels/require-owner-label
+      jsonpath: "{.spec.match.namespaces}"
+      operator: contains
+      value: staging
+
+    - name: "require-owner-label requires the owner key"
+      type: jsonpath
+      resource: k8srequiredlabels/require-owner-label
+      jsonpath: "{.spec.parameters.labels}"
+      operator: contains
+      value: owner
+
+    # --- Enforcement (negative): non-compliant pods must be REJECTED ---
+    - name: "ENFORCED: privileged pod in app is rejected"
       type: script
       script: |
-        echo "CKS-013 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - Deny privileged ConstraintTemplate exists with valid Rego
-        - Constraint excludes kube-system
-        - Required labels template supports parameterized key
-        - Constraint scopes to app and staging
-        - Privileged pod and unlabeled app pod fail
-        - Compliant pod succeeds
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -uo pipefail
+        pod='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"cks013-priv","namespace":"app","labels":{"owner":"sec-team"}},"spec":{"containers":[{"name":"c","image":"registry.k8s.io/pause:3.9","securityContext":{"privileged":true}}]}}'
+        for i in $(seq 1 30); do
+          out=$(printf '%s' "$pod" | kubectl apply --dry-run=server -f - 2>&1)
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "$out" | grep -q "deny-privileged" && { echo "correctly rejected: $out"; exit 0; }
+            echo "rejected, but not by deny-privileged: $out"; exit 1
+          fi
+          sleep 2
+        done
+        echo "privileged pod still ADMITTED after ~60s — deny-privileged is not enforced"; exit 1
+
+    - name: "ENFORCED: unlabeled pod in app is rejected"
+      type: script
+      script: |
+        set -uo pipefail
+        pod='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"cks013-nolabel","namespace":"app"},"spec":{"containers":[{"name":"c","image":"registry.k8s.io/pause:3.9"}]}}'
+        for i in $(seq 1 30); do
+          out=$(printf '%s' "$pod" | kubectl apply --dry-run=server -f - 2>&1)
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "$out" | grep -q "require-owner-label" && { echo "correctly rejected: $out"; exit 0; }
+            echo "rejected, but not by require-owner-label: $out"; exit 1
+          fi
+          sleep 2
+        done
+        echo "unlabeled pod still ADMITTED after ~60s — require-owner-label is not enforced"; exit 1
+
+    # --- Enforcement (positive): compliant / excluded pods must be ADMITTED ---
+    - name: "ALLOWED: compliant pod in app is admitted"
+      type: script
+      script: |
+        set -uo pipefail
+        pod='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"cks013-good","namespace":"app","labels":{"owner":"sec-team"}},"spec":{"containers":[{"name":"c","image":"registry.k8s.io/pause:3.9"}]}}'
+        out=$(printf '%s' "$pod" | kubectl apply --dry-run=server -f - 2>&1)
+        rc=$?
+        if [ "$rc" -ne 0 ]; then echo "compliant pod was wrongly rejected: $out"; exit 1; fi
+        echo "compliant pod admitted: $out"
+
+    - name: "ALLOWED: privileged pod in kube-system is admitted (exclusion works)"
+      type: script
+      script: |
+        set -uo pipefail
+        pod='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"cks013-ks","namespace":"kube-system"},"spec":{"containers":[{"name":"c","image":"registry.k8s.io/pause:3.9","securityContext":{"privileged":true}}]}}'
+        out=$(printf '%s' "$pod" | kubectl apply --dry-run=server -f - 2>&1)
+        rc=$?
+        if [ "$rc" -ne 0 ]; then echo "privileged pod in kube-system was rejected — exclusion is missing: $out"; exit 1; fi
+        echo "privileged pod admitted in kube-system (correctly excluded): $out"
 
   hints:
     - cost: 0
@@ -67,9 +191,23 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-013 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-013 complete. Gatekeeper now enforces two policies: privileged
+    containers are denied everywhere except kube-system, and pods in app/staging
+    must carry an `owner` label. Non-compliant pods are rejected at admission;
+    compliant pods still get through.
+
+    **Key takeaway:** policy-as-code is two objects — a ConstraintTemplate holds
+    the reusable Rego, a Constraint says where it applies (match.namespaces to
+    scope in, match.excludedNamespaces to carve out). Admission control only
+    stops NEW pods, so the pre-existing legacy-app pod stays until you replace it.
+
+  references:
+    - title: "Gatekeeper: How to use Gatekeeper"
+      url: "https://open-policy-agent.github.io/gatekeeper/website/docs/howto/"
+    - title: "Gatekeeper: ConstraintTemplates and Constraints"
+      url: "https://open-policy-agent.github.io/gatekeeper/website/docs/constrainttemplates/"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry installed Gatekeeper and then wrote zero policy. A privileged, unlabeled pod walked right in. Give the webhook something to enforce."
+    onCheckFail: "Templates without Constraints enforce nothing, and a Constraint needs its template's CRD first. Check both halves — and that bad pods actually get rejected."
+    onComplete: "Admission control has teeth now. Privileged pods bounce everywhere but kube-system, and app/staging pods must say who owns them."

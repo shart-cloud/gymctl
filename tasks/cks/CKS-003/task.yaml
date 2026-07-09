@@ -12,50 +12,202 @@ spec:
   difficulty: intermediate
   estimatedTime: 35m
   points: 140
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    The Kubernetes Dashboard is exposed at `dashboard.lab.local` over HTTP and its service account has cluster-admin. Create the `dashboard-tls` secret, enforce HTTPS on the Ingress, remove cluster-admin, and bind the dashboard service account to a least-privilege `dashboard-viewer` ClusterRole.
+    A "dashboard" web app is published through ingress-nginx at
+    `dashboard.lab.local`, and it is wrong in two ways the security team flagged:
+
+      1. **Cleartext.** The Ingress has no `tls:` block — `dashboard.lab.local`
+         is served over plain HTTP. Anyone on-path can read the traffic.
+      2. **Cluster-admin app.** The dashboard pod's ServiceAccount is bound to
+         `cluster-admin` via a ClusterRoleBinding. Compromise the pod and you
+         own the whole cluster.
+
+    Fix both:
+
+      - Create a `dashboard-tls` Secret (`kubernetes.io/tls`) holding a cert
+        whose CN/SAN is `dashboard.lab.local`, add a `tls:` block to the Ingress
+        referencing it, and force HTTP to redirect to HTTPS
+        (`nginx.ingress.kubernetes.io/force-ssl-redirect: "true"`).
+      - Delete the `dashboard-cluster-admin` ClusterRoleBinding and instead bind
+        the `dashboard` ServiceAccount to a least-privilege `dashboard-viewer`
+        ClusterRole: `get`/`list`/`watch` on the resources a read-only dashboard
+        renders (pods, services, deployments, namespaces, nodes, …) — no
+        secrets, no writes, no wildcards.
+
+    The gym's kind cluster has no host port mappings, so the live TLS checks
+    curl the ingress-nginx controller's ClusterIP from *inside* the cluster.
+    RBAC is verified with `kubectl auth can-i --as` the ServiceAccount.
 
   learningOutcomes:
-    - "Practice CKS domain: Cluster Setup"
-    - "Apply concepts: Ingress TLS, TLS Secret, Kubernetes Dashboard RBAC"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Cluster Setup — expose a Service over TLS with Ingress"
+    - "Create a kubernetes.io/tls Secret and wire it into an Ingress tls block"
+    - "Force HTTPS with force-ssl-redirect and verify HTTP is refused"
+    - "Replace a cluster-admin ServiceAccount with a least-privilege ClusterRole"
+    - "Verify effective permissions with kubectl auth can-i --as"
 
   tags:
     - "cks"
     - "cks-cluster-setup"
     - "tier-2"
     - "kind"
+    - "ingress-nginx"
     - "ingress-tls"
     - "tls-secret"
-    - "kubernetes-dashboard-rbac"
-
+    - "rbac"
+    - "least-privilege"
 
   environment:
     type: kubernetes
     kubernetes:
       provider: kind
       createCluster: true
-      namespace: default
+      namespace: kubernetes-dashboard
+    customSetup:
+      # kind ships NO ingress controller. Install ingress-nginx (pinned) using
+      # the kind-provider manifest, which pins the controller to nodes labelled
+      # ingress-ready=true and tolerates the control-plane taint — so label the
+      # (single) node first or the controller stays Pending forever.
+      - type: script
+        timeout: 300s
+        script: |
+          set -euo pipefail
+          echo "Labelling node ingress-ready=true (kind-provider nodeSelector)..."
+          node=$(kubectl get nodes -o name | head -1)
+          kubectl label "$node" ingress-ready=true --overwrite
+          echo "Installing ingress-nginx v1.12.3 (the ingress controller kind lacks)..."
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.3/deploy/static/provider/kind/deploy.yaml
+          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=240s
+          echo "Waiting for the admission webhook endpoint to be populated..."
+          for i in $(seq 1 60); do
+            ep=$(kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission \
+                   -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
+            if [ -n "$ep" ]; then echo "admission webhook ready at $ep"; break; fi
+            sleep 3
+          done
+      # Deploy the intentionally broken dashboard: plain-HTTP Ingress + a
+      # ServiceAccount bound to cluster-admin.
+      - type: script
+        timeout: 180s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/dashboard.yaml
+          kubectl -n kubernetes-dashboard rollout status deploy/dashboard --timeout=120s
+          echo "Broken state ready: dashboard.lab.local served over HTTP, SA is cluster-admin."
 
   checks:
-    - name: "Executable lab checks implemented"
+    # ---------- TLS: structural ----------
+    - name: "dashboard-tls secret exists and is type kubernetes.io/tls"
+      type: jsonpath
+      namespace: kubernetes-dashboard
+      resource: secret/dashboard-tls
+      jsonpath: "{.type}"
+      operator: equals
+      value: kubernetes.io/tls
+
+    - name: "dashboard-tls holds a cert/key whose SAN is dashboard.lab.local"
       type: script
       script: |
-        echo "CKS-003 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - dashboard-tls secret exists with cert/key
-        - Ingress tls block references dashboard-tls for dashboard.lab.local
-        - No cluster-admin binding remains for dashboard SA
-        - dashboard-viewer ClusterRole has get/list/watch on required resources
-        - ClusterRoleBinding binds dashboard-viewer to dashboard SA
-        - Dashboard is running and accessible
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -uo pipefail
+        crt=$(kubectl -n kubernetes-dashboard get secret dashboard-tls -o jsonpath='{.data.tls\.crt}' 2>/dev/null)
+        key=$(kubectl -n kubernetes-dashboard get secret dashboard-tls -o jsonpath='{.data.tls\.key}' 2>/dev/null)
+        [ -n "$crt" ] || { echo "secret has no tls.crt"; exit 1; }
+        [ -n "$key" ] || { echo "secret has no tls.key"; exit 1; }
+        txt=$(echo "$crt" | base64 -d | openssl x509 -noout -text 2>/dev/null)
+        echo "$txt" | grep -q "DNS:dashboard.lab.local" || {
+          echo "cert SubjectAltName is not dashboard.lab.local:"; echo "$txt" | grep -A1 "Subject Alternative Name" || true; exit 1; }
+        echo "dashboard-tls carries a cert for dashboard.lab.local"
+
+    - name: "Ingress tls block references dashboard-tls for dashboard.lab.local"
+      type: script
+      script: |
+        set -uo pipefail
+        sn=$(kubectl -n kubernetes-dashboard get ingress dashboard -o jsonpath='{.spec.tls[*].secretName}' 2>/dev/null)
+        echo "$sn" | grep -qw "dashboard-tls" || { echo "Ingress tls[].secretName is not dashboard-tls (got: '$sn')"; exit 1; }
+        hosts=$(kubectl -n kubernetes-dashboard get ingress dashboard -o jsonpath='{.spec.tls[*].hosts[*]}' 2>/dev/null)
+        echo "$hosts" | grep -qw "dashboard.lab.local" || { echo "tls block does not cover dashboard.lab.local (got: '$hosts')"; exit 1; }
+        echo "Ingress terminates TLS for dashboard.lab.local using dashboard-tls"
+
+    # ---------- TLS: live enforcement (from inside the cluster) ----------
+    - name: "LIVE: HTTPS through ingress serves the dashboard (200)"
+      type: script
+      script: |
+        set -uo pipefail
+        cip=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
+        [ -n "$cip" ] || { echo "no ingress-nginx controller ClusterIP"; exit 1; }
+        out=$(kubectl run cks003-https-$RANDOM --rm -i --restart=Never --image=curlimages/curl:8.10.1 --command -- \
+          sh -c "for i in \$(seq 1 20); do c=\$(curl -sk -o /dev/null -w '%{http_code}' --resolve dashboard.lab.local:443:$cip https://dashboard.lab.local/ 2>/dev/null); [ \"\$c\" = 200 ] && { echo HTTPS_OK; exit 0; }; sleep 3; done; echo LAST=\$c; exit 1" 2>/dev/null)
+        echo "$out" | grep -q HTTPS_OK || { echo "HTTPS did not return 200 through the ingress: $out"; exit 1; }
+        echo "TLS termination works: https://dashboard.lab.local -> 200"
+
+    - name: "LIVE: plain HTTP is redirected to HTTPS (308)"
+      type: script
+      script: |
+        set -uo pipefail
+        cip=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
+        [ -n "$cip" ] || { echo "no ingress-nginx controller ClusterIP"; exit 1; }
+        out=$(kubectl run cks003-http-$RANDOM --rm -i --restart=Never --image=curlimages/curl:8.10.1 --command -- \
+          sh -c "for i in \$(seq 1 20); do c=\$(curl -s -o /dev/null -w '%{http_code}' --resolve dashboard.lab.local:80:$cip http://dashboard.lab.local/ 2>/dev/null); [ \"\$c\" = 308 ] && { echo REDIRECT_OK; exit 0; }; sleep 3; done; echo LAST=\$c; exit 1" 2>/dev/null)
+        echo "$out" | grep -q REDIRECT_OK || { echo "HTTP was NOT redirected to HTTPS (force-ssl-redirect missing?): $out"; exit 1; }
+        echo "force-ssl-redirect works: http://dashboard.lab.local -> 308"
+
+    # ---------- RBAC: the cluster-admin grant is gone ----------
+    - name: "cluster-admin ClusterRoleBinding for the dashboard SA is deleted"
+      type: resourceExists
+      resource: clusterrolebinding/dashboard-cluster-admin
+      exists: false
+
+    - name: "ENFORCED: dashboard SA CANNOT delete pods cluster-wide"
+      type: script
+      script: |
+        set -uo pipefail
+        r=$(kubectl auth can-i delete pods -A --as=system:serviceaccount:kubernetes-dashboard:dashboard)
+        [ "$r" = "no" ] || { echo "dashboard SA can still delete pods (got: $r) — cluster-admin not fully removed"; exit 1; }
+
+    - name: "ENFORCED: dashboard SA has no cluster-wide wildcard access"
+      type: script
+      script: |
+        set -uo pipefail
+        r=$(kubectl auth can-i '*' '*' --all-namespaces --as=system:serviceaccount:kubernetes-dashboard:dashboard)
+        [ "$r" = "no" ] || { echo "dashboard SA still has wildcard '*' '*' access (got: $r)"; exit 1; }
+
+    - name: "ENFORCED: dashboard SA CANNOT read secrets"
+      type: script
+      script: |
+        set -uo pipefail
+        r=$(kubectl auth can-i get secrets -A --as=system:serviceaccount:kubernetes-dashboard:dashboard)
+        [ "$r" = "no" ] || { echo "dashboard SA can still read secrets (got: $r)"; exit 1; }
+
+    # ---------- RBAC: the viewer role actually works ----------
+    - name: "dashboard-viewer ClusterRole exists"
+      type: resourceExists
+      resource: clusterrole/dashboard-viewer
+
+    - name: "dashboard-viewer grants no write/wildcard verbs"
+      type: script
+      script: |
+        set -uo pipefail
+        verbs=$(kubectl get clusterrole dashboard-viewer -o jsonpath='{.rules[*].verbs}' 2>/dev/null)
+        [ -n "$verbs" ] || { echo "dashboard-viewer has no rules"; exit 1; }
+        for bad in create update patch delete deletecollection '\*'; do
+          if echo "$verbs" | grep -qw "$bad"; then echo "dashboard-viewer contains a non-read verb: $bad"; exit 1; fi
+        done
+        echo "read-only verbs only: $verbs"
+
+    - name: "ALLOWED: dashboard SA can list pods"
+      type: script
+      script: |
+        set -uo pipefail
+        r=$(kubectl auth can-i list pods --as=system:serviceaccount:kubernetes-dashboard:dashboard)
+        [ "$r" = "yes" ] || { echo "dashboard SA cannot list pods (got: $r) — viewer role not bound"; exit 1; }
+
+    - name: "ALLOWED: dashboard SA can get deployments cluster-wide"
+      type: script
+      script: |
+        set -uo pipefail
+        r=$(kubectl auth can-i get deployments -A --as=system:serviceaccount:kubernetes-dashboard:dashboard)
+        [ "$r" = "yes" ] || { echo "dashboard SA cannot get deployments (got: $r)"; exit 1; }
 
   hints:
     - cost: 0
@@ -66,9 +218,27 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-003 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-003 complete. dashboard.lab.local is now HTTPS-only — the Ingress
+    terminates TLS with the dashboard-tls cert and plain HTTP answers 308 → https
+    — and the dashboard ServiceAccount dropped from cluster-admin to a read-only
+    dashboard-viewer role.
+
+    **Key takeaway:** exposing a Service over TLS is two coupled objects — a
+    kubernetes.io/tls Secret plus a matching Ingress tls block — and a redirect
+    annotation to refuse cleartext. On the RBAC side, `kubectl apply` never
+    deletes: the cluster-admin binding stays until you remove it, and RBAC is
+    additive, so least privilege means *revoke the wildcard first*, then grant
+    back only get/list/watch.
+
+  references:
+    - title: "Kubernetes Ingress TLS"
+      url: "https://kubernetes.io/docs/concepts/services-networking/ingress/#tls"
+    - title: "ingress-nginx: force-ssl-redirect annotation"
+      url: "https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/#server-side-https-enforcement-through-redirect"
+    - title: "Using RBAC Authorization"
+      url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry published the dashboard over plain HTTP and gave its pod cluster-admin. One sniff and one popped pod own the cluster. Put it behind TLS and cut it down to read-only."
+    onCheckFail: "Still exposed. Either HTTP isn't redirecting to HTTPS, the tls secret is wrong, or the SA still has cluster-admin (remember: apply can't delete that binding)."
+    onComplete: "HTTPS-only and read-only. Jerry's dashboard can look but not touch, and nobody's reading it off the wire."

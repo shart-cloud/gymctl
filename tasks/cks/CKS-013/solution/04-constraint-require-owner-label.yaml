@@ -1,0 +1,16 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: require-owner-label
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    # Scope this rule to the two namespaces that must carry ownership metadata.
+    namespaces:
+      - app
+      - staging
+  parameters:
+    labels:
+      - owner

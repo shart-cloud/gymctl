@@ -12,15 +12,54 @@ spec:
   difficulty: advanced
   estimatedTime: 50m
   points: 200
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Create `image-policy-webhook` pointing to the admission service at `image-policy.policy-system.svc:8443`, with CA bundle, CREATE/UPDATE pod coverage, namespace exclusions, and failurePolicy Fail. Verify untrusted images and latest tags are rejected and trusted explicit tags succeed.
+    An image-admission control is supposed to keep untrusted and unpinned
+    container images out of the cluster, but it is not wired up — so anything
+    runs. The proof is `legacy-nginx` in the `default` namespace: it is on
+    `nginx:latest` (an untrusted Docker Hub source AND the floating `:latest`
+    tag) and it was admitted without complaint.
+
+    The admission BACKEND is already deployed and healthy: a Service
+    `image-policy` in the `policy-system` namespace (port 8443, path `/validate`)
+    that speaks AdmissionReview v1 and enforces the trusted-image policy below.
+    What is missing is the object that points the cluster's admission chain at
+    it. Author a **ValidatingWebhookConfiguration** named `image-policy-webhook`.
+
+    The policy the backend enforces, once you connect it:
+
+      1. **Reject untrusted sources** — Docker Hub images, whether explicit
+         (`docker.io/...`) or implicit (`nginx:1.27`).
+      2. **Reject the `:latest` tag** (or an untagged image).
+      3. **Allow** images from the trusted registry `registry.k8s.io` that carry
+         an explicit, non-latest tag (e.g. `registry.k8s.io/pause:3.9`).
+
+    Your ValidatingWebhookConfiguration must:
+
+      - `clientConfig.service` → `policy-system/image-policy`, path `/validate`,
+        port `8443`.
+      - carry the correct **caBundle** (the CA that signed the backend's serving
+        cert — see `hints/` / `solution/`). If it does not match, the TLS
+        handshake fails and, under fail-closed policy, every pod create is blocked.
+      - `rules` covering **CREATE and UPDATE** of **pods** (core group `""`, `v1`).
+      - **exclude** both `kube-system` AND `policy-system` (a `namespaceSelector`).
+      - `failurePolicy: Fail`, `sideEffects: None`,
+        `admissionReviewVersions: ["v1"]`.
+
+    Why fail-closed is safe here: the backend is live, and you exclude
+    `policy-system` so the webhook can never block its own backend's pods — a
+    deadlock that would otherwise make `failurePolicy: Fail` unrecoverable.
+
+    Checks that hit the webhook retry for up to ~60s to absorb the short delay
+    between registering the configuration and the webhook actually enforcing.
 
   learningOutcomes:
-    - "Practice CKS domain: Supply Chain Security"
-    - "Apply concepts: ValidatingWebhookConfiguration, image policy, trusted registries"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Supply Chain Security — admission-time image trust enforcement"
+    - "Author a ValidatingWebhookConfiguration that wires a Service-backed admission webhook"
+    - "Set clientConfig.service + caBundle so the API server can reach and trust the backend"
+    - "Scope rules to CREATE/UPDATE of pods and exclude system namespaces to avoid a fail-closed deadlock"
+    - "Verify real enforcement: untrusted/latest images rejected, trusted pinned images admitted"
 
   tags:
     - "cks"
@@ -31,33 +70,176 @@ spec:
     - "image-policy"
     - "trusted-registries"
 
-
   environment:
     type: kubernetes
     kubernetes:
       provider: kind
       createCluster: true
       namespace: default
+    customSetup:
+      # Ship the admission backend (Secret with the serving cert, ConfigMap with
+      # the AdmissionReview server, Deployment on stock python:3.12-alpine,
+      # Service on 8443) plus the demonstrator. Wait for the backend to be
+      # Available so it is reachable the moment the learner registers the webhook
+      # — otherwise a fail-closed webhook would block everything.
+      - type: script
+        timeout: 300s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/00-policy-system.yaml
+          kubectl apply -f setup/10-webhook-backend.yaml
+          kubectl apply -f setup/20-demonstrator.yaml
+          echo "Waiting for the image-policy admission backend to become Available..."
+          kubectl -n policy-system rollout status deploy/image-policy --timeout=240s
+          kubectl -n default rollout status deploy/legacy-nginx --timeout=120s
+          echo "Backend ready; legacy-nginx (nginx:latest) admitted with no webhook in force."
 
   checks:
-    - name: "Executable lab checks implemented"
+    # ---------- Structural: the webhook object ----------
+    - name: "ValidatingWebhookConfiguration image-policy-webhook exists"
+      type: resourceExists
+      resource: validatingwebhookconfiguration/image-policy-webhook
+
+    - name: "webhook rules cover the pods resource"
+      type: jsonpath
+      resource: validatingwebhookconfiguration/image-policy-webhook
+      jsonpath: "{.webhooks[*].rules[*].resources}"
+      operator: contains
+      value: pods
+
+    - name: "webhook rules cover CREATE"
+      type: jsonpath
+      resource: validatingwebhookconfiguration/image-policy-webhook
+      jsonpath: "{.webhooks[*].rules[*].operations}"
+      operator: contains
+      value: CREATE
+
+    - name: "webhook rules cover UPDATE"
+      type: jsonpath
+      resource: validatingwebhookconfiguration/image-policy-webhook
+      jsonpath: "{.webhooks[*].rules[*].operations}"
+      operator: contains
+      value: UPDATE
+
+    - name: "webhook failurePolicy is Fail"
+      type: jsonpath
+      resource: validatingwebhookconfiguration/image-policy-webhook
+      jsonpath: "{.webhooks[*].failurePolicy}"
+      operator: equals
+      value: Fail
+
+    - name: "webhook admissionReviewVersions includes v1"
+      type: jsonpath
+      resource: validatingwebhookconfiguration/image-policy-webhook
+      jsonpath: "{.webhooks[*].admissionReviewVersions}"
+      operator: contains
+      value: v1
+
+    - name: "webhook sideEffects is None"
+      type: jsonpath
+      resource: validatingwebhookconfiguration/image-policy-webhook
+      jsonpath: "{.webhooks[*].sideEffects}"
+      operator: equals
+      value: None
+
+    - name: "clientConfig points at Service policy-system/image-policy"
       type: script
       script: |
-        echo "CKS-020 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - ValidatingWebhookConfiguration exists
-        - Webhook targets CREATE/UPDATE pods
-        - CA bundle is set
-        - namespaceSelector excludes kube-system and policy-system
-        - failurePolicy is Fail
-        - Docker Hub image rejected
-        - Trusted explicit tag succeeds
-        - latest tag rejected
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -uo pipefail
+        svc=$(kubectl get validatingwebhookconfiguration image-policy-webhook \
+              -o jsonpath='{.webhooks[*].clientConfig.service.name}' 2>/dev/null)
+        ns=$(kubectl get validatingwebhookconfiguration image-policy-webhook \
+              -o jsonpath='{.webhooks[*].clientConfig.service.namespace}' 2>/dev/null)
+        [ "$svc" = "image-policy" ] || { echo "clientConfig.service.name is '$svc', want image-policy"; exit 1; }
+        [ "$ns" = "policy-system" ] || { echo "clientConfig.service.namespace is '$ns', want policy-system"; exit 1; }
+        echo "clientConfig -> policy-system/image-policy"
+
+    - name: "webhook carries a non-empty caBundle"
+      type: script
+      script: |
+        set -uo pipefail
+        ca=$(kubectl get validatingwebhookconfiguration image-policy-webhook \
+              -o jsonpath='{.webhooks[*].clientConfig.caBundle}' 2>/dev/null)
+        [ -n "$ca" ] || { echo "caBundle is empty — the API server cannot trust the backend"; exit 1; }
+        echo "caBundle present (${#ca} base64 chars)"
+
+    - name: "webhook excludes BOTH kube-system and policy-system"
+      type: script
+      script: |
+        set -uo pipefail
+        sel=$(kubectl get validatingwebhookconfiguration image-policy-webhook \
+               -o jsonpath='{.webhooks[*].namespaceSelector}' 2>/dev/null)
+        [ -n "$sel" ] || { echo "no namespaceSelector — kube-system/policy-system are NOT excluded"; exit 1; }
+        echo "$sel" | grep -q "kube-system"   || { echo "namespaceSelector does not mention kube-system: $sel"; exit 1; }
+        echo "$sel" | grep -q "policy-system" || { echo "namespaceSelector does not mention policy-system: $sel"; exit 1; }
+        echo "namespaceSelector excludes kube-system and policy-system: $sel"
+
+    # ---------- Backend health (positive) ----------
+    - name: "image-policy backend Deployment is Available"
+      type: condition
+      namespace: policy-system
+      resource: deployment/image-policy
+      condition: Available
+      status: "True"
+
+    # ---------- Enforcement (negative): bad images REJECTED ----------
+    - name: "ENFORCED: nginx:latest pod is REJECTED"
+      type: script
+      script: |
+        set -uo pipefail
+        pod='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"cks020-latest","namespace":"default"},"spec":{"containers":[{"name":"c","image":"nginx:latest"}]}}'
+        for i in $(seq 1 30); do
+          out=$(printf '%s' "$pod" | kubectl apply --dry-run=server -f - 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "$out" | grep -q "image-policy" && { echo "correctly rejected: $out"; exit 0; }
+            echo "rejected, but not by image-policy: $out"; exit 1
+          fi
+          sleep 2
+        done
+        echo "nginx:latest still ADMITTED after ~60s — the image policy is not enforced"; exit 1
+
+    - name: "ENFORCED: Docker Hub image nginx:1.27 is REJECTED"
+      type: script
+      script: |
+        set -uo pipefail
+        pod='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"cks020-dockerhub","namespace":"default"},"spec":{"containers":[{"name":"c","image":"nginx:1.27"}]}}'
+        for i in $(seq 1 30); do
+          out=$(printf '%s' "$pod" | kubectl apply --dry-run=server -f - 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "$out" | grep -q "image-policy" && { echo "correctly rejected: $out"; exit 0; }
+            echo "rejected, but not by image-policy: $out"; exit 1
+          fi
+          sleep 2
+        done
+        echo "nginx:1.27 (Docker Hub) still ADMITTED after ~60s — untrusted registry not blocked"; exit 1
+
+    # ---------- Enforcement (positive): trusted pinned image ADMITTED ----------
+    - name: "ALLOWED: registry.k8s.io/pause:3.9 pod is ADMITTED"
+      type: script
+      script: |
+        set -uo pipefail
+        pod='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"cks020-trusted","namespace":"default"},"spec":{"containers":[{"name":"c","image":"registry.k8s.io/pause:3.9"}]}}'
+        for i in $(seq 1 30); do
+          out=$(printf '%s' "$pod" | kubectl apply --dry-run=server -f - 2>&1)
+          rc=$?
+          if [ $rc -eq 0 ]; then echo "trusted image admitted: $out"; exit 0; fi
+          echo "$out" | grep -q "image-policy" && { echo "trusted image WRONGLY rejected by image-policy: $out"; sleep 2; continue; }
+          sleep 2
+        done
+        echo "registry.k8s.io/pause:3.9 was not admitted within ~60s (backend unreachable or caBundle mismatch?): $out"; exit 1
+
+    # ---------- Exclusion (positive): excluded namespace bypasses the webhook ----------
+    - name: "ALLOWED: a :latest pod in policy-system is ADMITTED (exclusion works)"
+      type: script
+      script: |
+        set -uo pipefail
+        pod='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"cks020-excluded","namespace":"policy-system"},"spec":{"containers":[{"name":"c","image":"nginx:latest"}]}}'
+        out=$(printf '%s' "$pod" | kubectl apply --dry-run=server -f - 2>&1)
+        if [ $? -ne 0 ]; then
+          echo "$out" | grep -q "image-policy" && { echo "policy-system was NOT excluded — the webhook fired on its own namespace: $out"; exit 1; }
+          echo "rejected for an unrelated reason: $out"; exit 1
+        fi
+        echo "nginx:latest admitted in policy-system (correctly excluded): $out"
 
   hints:
     - cost: 0
@@ -68,9 +250,28 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-020 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-020 complete. The image-policy-webhook ValidatingWebhookConfiguration now
+    wires the cluster to the admission backend: pods on Docker Hub sources or the
+    `:latest` tag are rejected at admission, while trusted, explicitly-tagged
+    images (registry.k8s.io/...) are admitted.
+
+    **Key takeaway:** a Service-backed validating webhook has three coupled
+    requirements — the clientConfig service/path/port must reach the backend, the
+    caBundle must match its serving cert, and the rules must cover the operations
+    you care about (CREATE + UPDATE of pods). failurePolicy: Fail is the secure
+    default, but it is only safe when the backend is reachable AND you exclude the
+    namespaces that run it (policy-system) and the control plane (kube-system) —
+    otherwise the webhook can deadlock the cluster or its own backend.
+
+  references:
+    - title: "Kubernetes: Dynamic Admission Control (ValidatingWebhookConfiguration)"
+      url: "https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/"
+    - title: "Kubernetes: AdmissionReview request/response"
+      url: "https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#webhook-request-and-response"
+    - title: "Kubernetes: Matching requests — namespaceSelector"
+      url: "https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#matching-requests-namespaceselector"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry built an image-policy admission backend, wired up the certs, then forgot to actually turn it on. nginx:latest strolled right in. Connect the webhook and shut the door."
+    onCheckFail: "The backend's up but the door's still open — or you slammed it on yourself. Check the caBundle matches, rules cover CREATE+UPDATE of pods, and you excluded kube-system AND policy-system (fail-closed on your own backend is a deadlock)."
+    onComplete: "Admission control has teeth. Untrusted and :latest images bounce, trusted pinned images pass, and the backend's own namespace is safely excluded."

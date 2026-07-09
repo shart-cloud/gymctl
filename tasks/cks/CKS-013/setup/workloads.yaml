@@ -1,0 +1,16 @@
+# The broken starting state. This pod is BOTH privileged and missing the
+# `owner` label, yet it schedules without complaint because Gatekeeper has no
+# Constraints yet — the ConstraintTemplates and Constraints are what you must
+# author. It is left running so you can see that admission control only stops
+# NEW pods; pre-existing violations are not evicted retroactively.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: legacy-app
+  namespace: app
+spec:
+  containers:
+    - name: app
+      image: registry.k8s.io/pause:3.9
+      securityContext:
+        privileged: true

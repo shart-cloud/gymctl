@@ -1,0 +1,207 @@
+# The admission BACKEND the learner does NOT write — it ships pre-built and must
+# be live and deterministic, because the learner's ValidatingWebhookConfiguration
+# uses failurePolicy: Fail. If this backend were unreachable, or its serving cert
+# did not match the caBundle in the webhook config, EVERY pod create in a
+# non-excluded namespace would be blocked (fail-closed) — including the "trusted"
+# ones — and the exercise would be unsolvable.
+#
+# It runs on a STOCK image (python:3.12-alpine) pulled at runtime, executing an
+# AdmissionReview server whose code is mounted from a ConfigMap and whose TLS
+# cert/key are mounted from a Secret. Nothing is `docker build`-ed, so it does
+# not couple to the kind cluster's name.
+#
+# The cert/key below are FIXED, pre-generated THROWAWAY lab certs. The server
+# cert carries subjectAltName DNS:image-policy.policy-system.svc (+ .cluster.local),
+# and its CA's base64 is embedded as the static caBundle in solution/. Committing
+# these training certs is intentional — it is what makes the webhook deterministic.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: image-policy-tls
+  namespace: policy-system
+type: kubernetes.io/tls
+data:
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURuekNDQW9lZ0F3SUJBZ0lVYnE1MWZFQ08wNkdMbE5xMFBOaWp3TlBMa05Zd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0hqRWNNQm9HQTFVRUF3d1RhVzFoWjJVdGNHOXNhV041TFd4aFlpMWpZVEFlRncweU5qQTNNRGt5TVRRegpNakphRncwek5qQTNNRFl5TVRRek1qSmFNQ2t4SnpBbEJnTlZCQU1NSG1sdFlXZGxMWEJ2YkdsamVTNXdiMnhwClkza3RjM2x6ZEdWdExuTjJZekNDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFLQWoKdHIycDNxWUtZTUU5M2hFZVhiYnpjUWV1STBXRTBHMy9EaFFHZTlhNk95YlZpeG40RFh5NkZ5Q1lTUVgzU3BwdgpSd0RzRHRUTWlSWktyRGE2RURLMm90QnozRFo0RXFUdnFsUkRmZWZVNXBwbWhxTlNTYnZ2OUtlNzFLekZ6d2thCkJFdWJRbTVRMkFudVNqSkhzd3FSb3FyZnpaRG9KSlJsUnZPcUNkUjBpdjZZTzlXYVVadWxOWFdqUTNXMnZoTisKTTJreWZ2MlU4MDQxYlhiQ1EycDJxeTlHcWkvZmFUK25tVi9sdzVkblcvWjBXVHJqNmZ0bE9GM2p0STVJY1VHOApNOEpoajFiajYzc3B0ZjR5bGRzN0o4SkI2RWFJS2JTZU1zODlrYUh6R0NqQTdsNmk1M0ZVRDAzcnJGSXRBUEVtClNndW1HTmZUdUhIdVA5RzRlUWNDQXdFQUFhT0J5VENCeGpBSkJnTlZIUk1FQWpBQU1Bc0dBMVVkRHdRRUF3SUYKb0RBVEJnTlZIU1VFRERBS0JnZ3JCZ0VGQlFjREFUQlhCZ05WSFJFRVVEQk9naDVwYldGblpTMXdiMnhwWTNrdQpjRzlzYVdONUxYTjVjM1JsYlM1emRtT0NMR2x0WVdkbExYQnZiR2xqZVM1d2IyeHBZM2t0YzNsemRHVnRMbk4yCll5NWpiSFZ6ZEdWeUxteHZZMkZzTUIwR0ExVWREZ1FXQkJRemJDNHdNL0R3djdDN3VMQXQzdzdrbm5sVkJ6QWYKQmdOVkhTTUVHREFXZ0JSbmZLTjAyQ2dOcWhXeU1rK1lpMnpIbER5TDZqQU5CZ2txaGtpRzl3MEJBUXNGQUFPQwpBUUVBclVFVk5NT3V3ZTFGaU9pTi9wOWIxZ2ZxK0QwRUZzOWtPSEI2bDVHTW43MlRmZzN4VEV1a0t1MmRSMkFRClhWZTcyenpxb0w1ZEZHdVRldnp0Nkg4b2RUMU0xQnIwcWYyT00yODFkUjNzK1dZS01qREh5RGNQV04zU2k3dnoKdWVGUFptWE9IM050RmRmclRFZFFWT3FuS0FlaXVFL216QXJOZlpXQ3QvR0oxaDRUcm9jWlhhUFFPWjUzU2dxRwpJWjFybk9SZnVmUnprM3VIZlZ3NXdqQmh2Wk0vWkNzT2kzT2xyWktDSnQxRXlyZ09nM09lRjMvNWxqanB3cDdkCjU2emZuTmpoUTVNclVDaTJHanB3SU4vU2Rwd1M4R2gwbm8zc204TGs2Y0U0eVc3Qk11ZGhzVm0vdGZBMjhnN0MKS2I4clRpMjNEY21ab0tsaWRVditwSmNBdkE9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+  tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2Z0lCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktnd2dnU2tBZ0VBQW9JQkFRQ2dJN2E5cWQ2bUNtREIKUGQ0UkhsMjI4M0VIcmlORmhOQnQvdzRVQm52V3Vqc20xWXNaK0ExOHVoY2dtRWtGOTBxYWIwY0E3QTdVeklrVwpTcXcydWhBeXRxTFFjOXcyZUJLazc2cFVRMzNuMU9hYVpvYWpVa203Ny9TbnU5U3N4YzhKR2dSTG0wSnVVTmdKCjdrb3lSN01La2FLcTM4MlE2Q1NVWlVienFnblVkSXIrbUR2Vm1sR2JwVFYxbzBOMXRyNFRmak5wTW43OWxQTk8KTlcxMndrTnFkcXN2UnFvdjMyay9wNWxmNWNPWFoxdjJkRms2NCtuN1pUaGQ0N1NPU0hGQnZEUENZWTlXNCt0NwpLYlgrTXBYYk95ZkNRZWhHaUNtMG5qTFBQWkdoOHhnb3dPNWVvdWR4VkE5TjY2eFNMUUR4SmtvTHBoalgwN2h4CjdqL1J1SGtIQWdNQkFBRUNnZ0VBUlluTW9FYUQ5dkVadThBc1RwMnpqeTdlUGJvSitmV205cVRqVGFIVkk5VEIKdStiTjNReUFldEZxR283V1l0OVVCNFRidmRSRHluYzQ3ak9sM2F2bFBjaGVJZ3UxcS9kdkRTMC9keERKdXlLUgpzcWxqdk1jT1dxeGp2blNMY1MwQ2JzN2IzNkwvY1Z6c3V6ODgrK0Z6cDFxL1d0a05jR2ZGL3FTTjcyQStuWUVBCk9yTXcwVlAxYVEwbVNIZ1ZYdFN0bGtZM3N5Wk9LRFoyQ1Y0TTdGcWc3SzlpTlhZVkh3WjE0L0hGbWt4NFVySEgKMGRXb3N4Nm1tc3Z6T0FwUGMvdkVjWSt1MW5LM0xZeTh2LzN1OFZRZDJPOURua21DY0Z2Qkc4cHVTVWMwbjVtZQp2bE1Lck5XWnQyUy9oaDNMTTBuNXE3M0pjVjd3azBpOEM4SXB0YWlVL1FLQmdRRE9vbmlIZTQzdkpmQnQ5eFhaCk54QndteHFKcyt6V3daaW1XZ3Q3VzlmeFdITEVZQ2RuVnB2VEx6QlZHNVg0OEtKazg5TUM0MFJzTzFoWjJMbEIKZW5RVmgvc0NpT2J4TXVNcUJGQ1RIYStCQXZuR0d5RjFOV1gzSDVFNENMRUZ6NVlpTFE3Y1RGWDVOSFE3ZE1iRApOS3VHdGVaNDMzenhMWlQ3ejFudjZaNUxUUUtCZ1FER1phZkZaeFNZYkkxNnE5WlVkbmR6TTlxYlhJTk9NWEk1CnYvTElTU0VuclE0cnhUaEtYMXdwclgvMHVSZGhINFFMT09WbTNuMSt0N3FZZ2dNNm5UMDRXMHV5bjlrUXdDaFYKWGZwenJWNEZ6Sm5FVFZod3RoWjhWUFlsN3pNeTN2V084YkNoblZzVzAyYlovM1pmR3M0MjQ0Wm5UcEM0bzg1VApUNGoxeEs4am93S0JnRUpoQlBFWTZzNkJWSXd1ekxEN3RHZElIQzFTUkduMHhSSGphVDdXa1RjeG42U2Y4dWlLCmRRSlJiV2hadFVMRUlwYmxrTXFqc1c1SFhpbDJxb1J6VHVrL3hvM1k1cjlqQm9DUDVFWnVTZHZhMWR3akNRdDYKL09kM0Y1SjFrRkI2a0JNb2dGYWFteCswRHdhdWk4OVhreVp5TnJocnF0cGJOem54TVVZVnVVa2RBb0dCQUlFaQpMNVpVWnRwalpaOGY4K3ljQTFuUHVZMkFKTk1qYWdiZXdrYk5HckI1ZW96UTNMZkQ0L2dZdnYxcDhDYStYYkwwClFKUzVZcE8xUU5YOVlkNm44KzRYdG1pNGxJL0xrelVsYTF3Wnp1WVZhMHlUVDJwbGlyTTRsZExSSTlFTHdHZGYKTnltcWcxeVRFeEgzcm5OdXZpU0o2YlNhTmFhSXNFWVhzYnpPWFhUakFvR0JBSTFnRWhyc1A0QzNnMFlQQ1kvZQoyRVhXU2FMQUt3dGVLQmU1c3hXMnJsMWRVTG1mSmhoQUwvbHRBTWhzbFVsWmhkQmNyRmFEbEF3dDhSV3NHTUEzCktZcmN1Rm5rY1Rqcm0zK0lCSDNoM0dlL0hyZXdudjFzUmU1TlpnblpDTmV2OXJWZlJXbXY5c0tLTDZYSmV3YVgKN3pYREpKRGdTK0tQLzFqY3FEVzRuRjdsCi0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: image-policy-code
+  namespace: policy-system
+data:
+  webhook.py: |
+    #!/usr/bin/env python3
+    # Image-admission AdmissionReview backend.
+    #
+    # Policy enforced on every container/initContainer/ephemeralContainer image:
+    #   1. DENY the ':latest' tag or an untagged image (no explicit tag).
+    #   2. DENY any image whose registry is not in TRUSTED_REGISTRIES
+    #      (implicit Docker Hub images like 'nginx:1.27' resolve to docker.io).
+    #   3. ALLOW only trusted-registry images carrying an explicit, non-latest tag.
+    #
+    # Fails SAFE: any parse error denies with a message, so tests stay meaningful.
+    import json
+    import ssl
+    import sys
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    TRUSTED_REGISTRIES = ("registry.k8s.io",)
+
+    def parse_image(image):
+        # -> (registry, tag_or_None)
+        ref = image.split("@", 1)[0]  # drop any digest
+        head, _, rest = ref.partition("/")
+        if rest and ("." in head or ":" in head or head == "localhost"):
+            registry, remainder = head, rest
+        else:
+            registry, remainder = "docker.io", ref
+        last = remainder.rsplit("/", 1)[-1]
+        tag = last.rsplit(":", 1)[1] if ":" in last else None
+        return registry, tag
+
+    def evaluate(pod):
+        spec = pod.get("spec", {}) or {}
+        containers = []
+        for key in ("containers", "initContainers", "ephemeralContainers"):
+            containers.extend(spec.get(key) or [])
+        if not containers:
+            return True, "no containers to evaluate"
+        for c in containers:
+            image = c.get("image", "") or ""
+            registry, tag = parse_image(image)
+            if tag is None or tag == "latest":
+                return False, ("image '%s' uses the 'latest' tag or no tag; "
+                               "an explicit non-latest tag is required" % image)
+            if registry not in TRUSTED_REGISTRIES:
+                return False, ("image '%s' comes from untrusted registry '%s'; "
+                               "only %s is trusted" %
+                               (image, registry, ", ".join(TRUSTED_REGISTRIES)))
+        return True, "all images use a trusted registry with an explicit non-latest tag"
+
+    class Handler(BaseHTTPRequestHandler):
+        def _respond(self, uid, allowed, message):
+            review = {
+                "apiVersion": "admission.k8s.io/v1",
+                "kind": "AdmissionReview",
+                "response": {
+                    "uid": uid,
+                    "allowed": allowed,
+                    "status": {"code": 200 if allowed else 403, "message": message},
+                },
+            }
+            body = json.dumps(review).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            sys.stdout.write("[image-policy] uid=%s %s: %s\n" %
+                             (uid, "ALLOW" if allowed else "DENY", message))
+            sys.stdout.flush()
+
+        def do_POST(self):
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                review = json.loads(self.rfile.read(length))
+                req = review.get("request", {}) or {}
+                uid = req.get("uid", "")
+                obj = req.get("object", {}) or {}
+                allowed, message = evaluate(obj)
+                self._respond(uid, allowed, message)
+            except Exception as exc:  # fail safe: deny on parse failure
+                try:
+                    self._respond("", False,
+                                  "image-policy could not parse AdmissionReview: %s" % exc)
+                except Exception:
+                    pass
+
+        def do_GET(self):  # trivial liveness endpoint
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args):  # silence default access logging
+            return
+
+    def main():
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(certfile="/tls/tls.crt", keyfile="/tls/tls.key")
+        httpd = HTTPServer(("0.0.0.0", 8443), Handler)
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+        sys.stdout.write("[image-policy] serving HTTPS on :8443\n")
+        sys.stdout.flush()
+        httpd.serve_forever()
+
+    if __name__ == "__main__":
+        main()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-policy
+  namespace: policy-system
+  labels:
+    app: image-policy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: image-policy
+  template:
+    metadata:
+      labels:
+        app: image-policy
+    spec:
+      containers:
+        - name: webhook
+          image: python:3.12-alpine
+          command: ["python3", "/app/webhook.py"]
+          ports:
+            - containerPort: 8443
+              name: https
+          volumeMounts:
+            - name: code
+              mountPath: /app
+              readOnly: true
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 8443
+            initialDelaySeconds: 3
+            periodSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: 8443
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: code
+          configMap:
+            name: image-policy-code
+        - name: tls
+          secret:
+            secretName: image-policy-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-policy
+  namespace: policy-system
+spec:
+  selector:
+    app: image-policy
+  ports:
+    - name: https
+      port: 8443
+      targetPort: 8443
