@@ -98,7 +98,7 @@ gymctl exam cka --backend vagrant --duration-minutes 120 --seed 42
 | `gymctl reset [name]` | Reset to the initial broken state |
 | `gymctl watch [name]` | Auto-run checks on file save (Docker) or on interval (Kubernetes) |
 | `gymctl info [name]` | Show exercise details: description, checks, references |
-| `gymctl next` | Show your next recommended exercise from GRIM-9 |
+| `gymctl next` | Show your next recommended exercise |
 | `gymctl shell` | Open the interactive exercise browser TUI |
 | `gymctl diagnose` | Check Docker/Kubernetes/network prerequisites |
 | `gymctl recover [name]` | Recover from corrupted state |

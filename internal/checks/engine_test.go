@@ -2,10 +2,13 @@ package checks
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"gymctl/internal/scenario"
@@ -197,6 +200,109 @@ func TestCheckExpectOutput(t *testing.T) {
 				t.Errorf("checkExpectOutput() passed = %v, want %v, msg = %s", result.Passed, tt.wantPass, result.Message)
 			}
 		})
+	}
+}
+
+type fakeCommandRunner struct {
+	outputs map[string]string
+	errors  map[string]error
+	calls   []string
+}
+
+func (f *fakeCommandRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	call := strings.Join(append([]string{name}, args...), " ")
+	f.calls = append(f.calls, call)
+	return f.outputs[call], f.errors[call]
+}
+
+func (f *fakeCommandRunner) RunInDir(ctx context.Context, dir string, name string, args ...string) (string, error) {
+	call := "dir=" + dir + " " + strings.Join(append([]string{name}, args...), " ")
+	f.calls = append(f.calls, call)
+	return f.outputs[call], f.errors[call]
+}
+
+func TestRunCheckWithRunnerDockerAndKubernetesDispatch(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name      string
+		exercise  *scenario.Exercise
+		check     scenario.Check
+		outputs   map[string]string
+		errors    map[string]error
+		wantPass  bool
+		wantCalls []string
+	}{
+		{
+			name: "kubernetes jsonpath uses namespace and compares output",
+			exercise: &scenario.Exercise{Spec: scenario.ExerciseSpec{
+				Environment: scenario.EnvironmentSpec{
+					Type:       "kubernetes",
+					Kubernetes: &scenario.KubernetesSpec{Namespace: "app"},
+				},
+			}},
+			check:     scenario.Check{Type: "jsonpath", Resource: "deploy/app", Jsonpath: "{.status.readyReplicas}", Operator: "equals", Value: "3"},
+			outputs:   map[string]string{"kubectl get deploy/app -o jsonpath={.status.readyReplicas} -n app": "3"},
+			wantPass:  true,
+			wantCalls: []string{"kubectl get deploy/app -o jsonpath={.status.readyReplicas} -n app"},
+		},
+		{
+			name: "kubernetes resource existence can expect missing",
+			exercise: &scenario.Exercise{Spec: scenario.ExerciseSpec{
+				Environment: scenario.EnvironmentSpec{
+					Type:       "kubernetes",
+					Kubernetes: &scenario.KubernetesSpec{Namespace: "app"},
+				},
+			}},
+			check:     scenario.Check{Type: "resourceExists", Resource: "secret/gone", Exists: boolPtr(false)},
+			errors:    map[string]error{"kubectl get secret/gone -n app": fmt.Errorf("not found")},
+			wantPass:  true,
+			wantCalls: []string{"kubectl get secret/gone -n app"},
+		},
+		{
+			name: "docker image size compares inspect output",
+			exercise: &scenario.Exercise{Spec: scenario.ExerciseSpec{
+				Environment: scenario.EnvironmentSpec{Type: "docker"},
+			}},
+			check:     scenario.Check{Type: "docker-image", Image: "app:latest", Property: "size", Operator: "lessThan", Value: "2MB"},
+			outputs:   map[string]string{"docker image inspect app:latest --format {{.Size}}": "1048576"},
+			wantPass:  true,
+			wantCalls: []string{"docker image inspect app:latest --format {{.Size}}"},
+		},
+		{
+			name: "docker exec evaluates output",
+			exercise: &scenario.Exercise{Spec: scenario.ExerciseSpec{
+				Environment: scenario.EnvironmentSpec{Type: "docker"},
+			}},
+			check:     scenario.Check{Type: "exec", Container: "app", Command: []string{"cat", "/status"}, ExpectOutput: &scenario.ExpectOutput{Contains: "ready"}},
+			outputs:   map[string]string{"docker exec app cat /status": "ready\n"},
+			wantPass:  true,
+			wantCalls: []string{"docker exec app cat /status"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeCommandRunner{outputs: tt.outputs, errors: tt.errors}
+			result := runCheckWithRunner(ctx, fake, tt.exercise, "", tt.check)
+			if result.Passed != tt.wantPass {
+				t.Fatalf("runCheckWithRunner() passed = %v, want %v, result=%+v", result.Passed, tt.wantPass, result)
+			}
+			if !reflect.DeepEqual(fake.calls, tt.wantCalls) {
+				t.Fatalf("calls = %#v, want %#v", fake.calls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestNewResultFallsBackToType(t *testing.T) {
+	got := newResult(scenario.Check{Type: "jsonpath"})
+	if got.Name != "jsonpath" {
+		t.Fatalf("expected type fallback, got %q", got.Name)
+	}
+
+	got = newResult(scenario.Check{Name: "ready", Type: "jsonpath"})
+	if got.Name != "ready" {
+		t.Fatalf("expected explicit name, got %q", got.Name)
 	}
 }
 
@@ -471,6 +577,111 @@ func TestRunMCQChecksQuestionMissingFromLab(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].Message != "question not found in lab.md" {
 		t.Fatalf("unexpected results: %+v", results)
+	}
+}
+
+func TestRunCheckDispatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "ready.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write ready file: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		exercise    *scenario.Exercise
+		check       scenario.Check
+		wantPass    bool
+		wantMessage string
+	}{
+		{
+			name: "environment agnostic file check runs before environment dispatch",
+			exercise: &scenario.Exercise{Spec: scenario.ExerciseSpec{
+				Environment: scenario.EnvironmentSpec{Type: "kubernetes"},
+			}},
+			check:    scenario.Check{Name: "file", Type: "file", Path: "ready.txt", Exists: boolPtr(true)},
+			wantPass: true,
+		},
+		{
+			name: "environment agnostic script check runs before environment dispatch",
+			exercise: &scenario.Exercise{Spec: scenario.ExerciseSpec{
+				Environment: scenario.EnvironmentSpec{Type: "docker"},
+			}},
+			check:    scenario.Check{Name: "script", Type: "script", Script: "echo ok"},
+			wantPass: true,
+		},
+		{
+			name: "missing kubernetes config",
+			exercise: &scenario.Exercise{Spec: scenario.ExerciseSpec{
+				Environment: scenario.EnvironmentSpec{Type: "kubernetes"},
+			}},
+			check:       scenario.Check{Name: "jsonpath", Type: "jsonpath"},
+			wantMessage: "missing kubernetes config",
+		},
+		{
+			name: "unsupported docker check type",
+			exercise: &scenario.Exercise{Spec: scenario.ExerciseSpec{
+				Environment: scenario.EnvironmentSpec{Type: "docker"},
+			}},
+			check:       scenario.Check{Name: "bad", Type: "unknown"},
+			wantMessage: "unsupported check type: unknown",
+		},
+		{
+			name: "unsupported local check type",
+			exercise: &scenario.Exercise{Spec: scenario.ExerciseSpec{
+				Environment: scenario.EnvironmentSpec{Type: "local"},
+			}},
+			check:       scenario.Check{Name: "local", Type: "exec"},
+			wantMessage: "unsupported local-only check type: exec",
+		},
+		{
+			name: "unsupported environment",
+			exercise: &scenario.Exercise{Spec: scenario.ExerciseSpec{
+				Environment: scenario.EnvironmentSpec{Type: "vm"},
+			}},
+			check:       scenario.Check{Name: "bad", Type: "unknown"},
+			wantMessage: "unsupported environment for checks",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := runCheck(context.Background(), tt.exercise, tmpDir, tt.check)
+			if result.Passed != tt.wantPass {
+				t.Fatalf("runCheck() passed = %v, want %v, result=%+v", result.Passed, tt.wantPass, result)
+			}
+			if tt.wantMessage != "" && result.Message != tt.wantMessage {
+				t.Fatalf("runCheck() message = %q, want %q", result.Message, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestRunExerciseChecksAggregatesDispatchResults(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "ready.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write ready file: %v", err)
+	}
+
+	exercise := &scenario.Exercise{Spec: scenario.ExerciseSpec{
+		Environment: scenario.EnvironmentSpec{Type: "docker"},
+		Checks: []scenario.Check{
+			{Name: "present", Type: "file", Path: "ready.txt", Exists: boolPtr(true)},
+			{Name: "missing", Type: "file", Path: "missing.txt", Exists: boolPtr(true)},
+		},
+	}}
+
+	results, allPassed := RunExerciseChecks(context.Background(), exercise, tmpDir)
+	if allPassed {
+		t.Fatalf("expected allPassed=false")
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if !results[0].Passed {
+		t.Fatalf("expected first result to pass: %+v", results[0])
+	}
+	if results[1].Passed {
+		t.Fatalf("expected second result to fail: %+v", results[1])
 	}
 }
 

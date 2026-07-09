@@ -18,6 +18,7 @@ import (
 type resetOptions struct {
 	noCluster bool
 	keepWork  bool
+	backup    bool
 }
 
 func newResetCmd() *cobra.Command {
@@ -47,6 +48,19 @@ func newResetCmd() *cobra.Command {
 				return fmt.Errorf("exercise not found: %s", name)
 			}
 			exercise := entry.Exercise
+
+			// Optionally back up before destroying work
+			if opts.backup {
+				spinner := NewSpinnerManager()
+				spinner.Start(fmt.Sprintf("Backing up %s", exercise.Metadata.Name))
+				backupPath, err := createBackup(exercise.Metadata.Name)
+				if err != nil {
+					spinner.Fail("Backup failed")
+					return fmt.Errorf("create backup before reset: %w", err)
+				}
+				spinner.Success("Backup created")
+				ColorInfo.Fprintf(cmd.OutOrStdout(), "  Backup saved: %s\n", backupPath)
+			}
 
 			ctx := cmd.Context()
 			if ctx == nil {
@@ -131,7 +145,7 @@ func newResetCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				manager := environment.DockerManager{WorkDir: workDir}
+				manager := environment.DockerManager{WorkDir: workDir, ExerciseName: exercise.Metadata.Name}
 				if err := manager.Teardown(ctx, entry.Dir, *exercise.Spec.Environment.Docker); err != nil {
 					return err
 				}
@@ -190,6 +204,7 @@ func newResetCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&opts.noCluster, "no-cluster", false, "Skip kubernetes cluster recreation")
 	cmd.Flags().BoolVar(&opts.keepWork, "keep-work", false, "Keep work directory contents")
+	cmd.Flags().BoolVar(&opts.backup, "backup", false, "Create a backup before resetting")
 	return cmd
 }
 

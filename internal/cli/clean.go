@@ -43,7 +43,7 @@ func newCleanCmd() *cobra.Command {
 						if err != nil {
 							return err
 						}
-						manager := environment.DockerManager{WorkDir: workDir}
+						manager := environment.DockerManager{WorkDir: workDir, ExerciseName: exercise.Metadata.Name}
 						_ = manager.Teardown(ctx, entry.Dir, *exercise.Spec.Environment.Docker)
 					case "kubernetes":
 						if exercise.Spec.Environment.Kubernetes == nil {
@@ -73,7 +73,7 @@ func newCleanCmd() *cobra.Command {
 								if err != nil {
 									return err
 								}
-								manager := environment.DockerManager{WorkDir: workDir}
+								manager := environment.DockerManager{WorkDir: workDir, ExerciseName: exercise.Metadata.Name}
 								_ = manager.Teardown(ctx, entry.Dir, *exercise.Spec.Environment.Docker)
 							}
 						case "kubernetes":

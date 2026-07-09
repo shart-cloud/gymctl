@@ -33,6 +33,10 @@
         },
         "estimatedTime": {"type": "string"},
         "points": {"type": "integer"},
+        "implementationStatus": {
+          "type": "string",
+          "enum": ["scaffold", "draft", "ready"]
+        },
         "description": {"type": "string"},
         "learningOutcomes": {
           "type": "array",
@@ -52,7 +56,7 @@
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["docker", "kubernetes", "hybrid", "local"]
+              "enum": ["docker", "kubernetes", "local"]
             },
             "kubernetes": {
               "type": "object",
@@ -187,7 +191,6 @@
           }
         },
         "successMessage": {"type": "string"},
-        "nextExercise": {"type": "string"},
         "references": {
           "type": "array",
           "items": {
@@ -199,14 +202,6 @@
             }
           }
         },
-        "variants": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["name"]
-          }
-        },
-        "variantSelection": {"type": "string"},
         "jerryDialog": {
           "type": "object",
           "properties": {
@@ -218,15 +213,12 @@
           },
           "additionalProperties": false
         },
-        "tasking": {
+        "brief": {
           "type": "object",
-          "required": ["ticket", "priority", "summary", "description"],
+          "required": ["summary"],
           "properties": {
-            "ticket":      {"type": "string"},
-            "priority":    {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
             "summary":     {"type": "string"},
-            "description": {"type": "string"},
-            "reporter":    {"type": "string"}
+            "description": {"type": "string"}
           },
           "additionalProperties": false
         }

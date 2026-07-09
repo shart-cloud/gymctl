@@ -67,13 +67,6 @@ spec:
   successMessage: |
     CKS-017 complete. You remediated the target CKS scenario and verified the controls.
 
-  tasking:
-    ticket: "CKS-017"
-    priority: "P1"
-    summary: "Base Image Minimization"
-    description: "Scaffolded CKS exercise for Supply Chain Security using kind infrastructure."
-    reporter: "GRIM-9"
-
   jerryDialog:
     onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
     onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."

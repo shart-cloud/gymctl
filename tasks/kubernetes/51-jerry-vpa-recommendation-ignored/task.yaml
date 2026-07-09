@@ -109,16 +109,13 @@ spec:
       kubectl describe vpa <name>
     Look for the Status.Recommendation.containerRecommendations section.
 
-  tasking:
-    ticket: "OPS-3301"
-    priority: "P2"
+  brief:
     summary: "VPA created but not producing recommendations, requests unchanged"
     description: |
       Jerry said "I added VPA, we're good." The VPA object exists. Zero
       recommendations have been produced. The deployment still requests 800m CPU
       and 512Mi memory for a pod that actually uses about 60m and 40Mi at peak.
       We're wasting resources cluster-wide. Fix the pipeline and right-size the requests.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "i applied the vpa yaml, it shows up in kubectl get vpa, what more do you want"

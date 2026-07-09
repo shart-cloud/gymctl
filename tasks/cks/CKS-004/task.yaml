@@ -81,13 +81,6 @@ spec:
   successMessage: |
     CKS-004 complete. You remediated the target CKS scenario and verified the controls.
 
-  tasking:
-    ticket: "CKS-004"
-    priority: "P1"
-    summary: "Binary Verification and Cluster Integrity"
-    description: "Scaffolded CKS exercise for Cluster Setup using vm infrastructure."
-    reporter: "GRIM-9"
-
   jerryDialog:
     onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
     onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."

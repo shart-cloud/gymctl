@@ -12,9 +12,10 @@ import (
 )
 
 type listOptions struct {
-	track      string
-	difficulty string
-	week       int
+	track           string
+	difficulty      string
+	week            int
+	includeScaffold bool
 }
 
 func newListCmd() *cobra.Command {
@@ -27,6 +28,7 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			entries = filterScaffoldEntries(entries, opts.includeScaffold)
 
 			// Load progress to show completion status
 			progressPath, err := resolveProgressFile()
@@ -42,19 +44,20 @@ func newListCmd() *cobra.Command {
 
 			if isJSONOutput() {
 				type listExerciseJSON struct {
-					Name           string   `json:"name"`
-					Title          string   `json:"title"`
-					Track          string   `json:"track"`
-					Week           int      `json:"week"`
-					Order          int      `json:"order"`
-					Difficulty     string   `json:"difficulty"`
-					EstimatedTime  string   `json:"estimatedTime"`
-					Points         int      `json:"points"`
-					Status         string   `json:"status"`
-					Score          int      `json:"score"`
-					Tags           []string `json:"tags"`
-					Locked         bool     `json:"locked"`
-					MissingPrereqs []string `json:"missingPrereqs"`
+					Name                 string   `json:"name"`
+					Title                string   `json:"title"`
+					Track                string   `json:"track"`
+					Week                 int      `json:"week"`
+					Order                int      `json:"order"`
+					Difficulty           string   `json:"difficulty"`
+					EstimatedTime        string   `json:"estimatedTime"`
+					Points               int      `json:"points"`
+					ImplementationStatus string   `json:"implementationStatus"`
+					Status               string   `json:"status"`
+					Score                int      `json:"score"`
+					Tags                 []string `json:"tags"`
+					Locked               bool     `json:"locked"`
+					MissingPrereqs       []string `json:"missingPrereqs"`
 				}
 				type listSummaryJSON struct {
 					Total        int `json:"total"`
@@ -96,19 +99,20 @@ func newListCmd() *cobra.Command {
 					}
 
 					response.Exercises = append(response.Exercises, listExerciseJSON{
-						Name:           exercise.Metadata.Name,
-						Title:          exercise.Metadata.Title,
-						Track:          exercise.Metadata.Track,
-						Week:           exercise.Metadata.Week,
-						Order:          exercise.Metadata.Order,
-						Difficulty:     exercise.Spec.Difficulty,
-						EstimatedTime:  exercise.Spec.EstimatedTime,
-						Points:         defaultPoints(exercise.Spec.Points),
-						Status:         status,
-						Score:          st.Score,
-						Tags:           exercise.Spec.Tags,
-						Locked:         locked,
-						MissingPrereqs: missingPrereqs,
+						Name:                 exercise.Metadata.Name,
+						Title:                exercise.Metadata.Title,
+						Track:                exercise.Metadata.Track,
+						Week:                 exercise.Metadata.Week,
+						Order:                exercise.Metadata.Order,
+						Difficulty:           exercise.Spec.Difficulty,
+						EstimatedTime:        exercise.Spec.EstimatedTime,
+						Points:               defaultPoints(exercise.Spec.Points),
+						ImplementationStatus: scenario.NormalizeImplementationStatus(exercise.Spec.ImplementationStatus),
+						Status:               status,
+						Score:                st.Score,
+						Tags:                 exercise.Spec.Tags,
+						Locked:               locked,
+						MissingPrereqs:       missingPrereqs,
 					})
 
 					response.Summary.Total++
@@ -160,8 +164,8 @@ func newListCmd() *cobra.Command {
 				}
 			}
 
-			// GRIM sprint header
-			ColorTrack.Fprintf(cmd.OutOrStdout(), "  GRIM-9 · Sprint Overview")
+			// header
+			ColorTrack.Fprintf(cmd.OutOrStdout(), "  exercises")
 			ColorDim.Fprintf(cmd.OutOrStdout(), "  ·  %d/%d complete  ·  %d in progress\n", completedCount, len(filtered), inProgressCount)
 
 			currentTrack := ""
@@ -234,6 +238,7 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.track, "track", "", "Filter by track")
 	cmd.Flags().StringVar(&opts.difficulty, "difficulty", "", "Filter by difficulty")
 	cmd.Flags().IntVar(&opts.week, "week", 0, "Filter by week")
+	cmd.Flags().BoolVar(&opts.includeScaffold, "include-scaffold", false, "Include scaffolded exercises")
 
 	return cmd
 }

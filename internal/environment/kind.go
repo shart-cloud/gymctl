@@ -56,11 +56,6 @@ func (k KindManager) Exists(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-func (k KindManager) LoadImage(ctx context.Context, image string) error {
-	_, err := runner.Run(ctx, "kind", "load", "docker-image", "--name", k.ClusterName, image)
-	return err
-}
-
 func splitLines(value string) []string {
 	if value == "" {
 		return nil

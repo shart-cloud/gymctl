@@ -74,7 +74,7 @@ func newStopCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				manager := environment.DockerManager{WorkDir: workDir}
+				manager := environment.DockerManager{WorkDir: workDir, ExerciseName: exercise.Metadata.Name}
 				fmt.Fprintln(cmd.OutOrStdout(), "Stopping docker containers...")
 				if err := manager.Teardown(ctx, entry.Dir, *exercise.Spec.Environment.Docker); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to teardown docker: %v\n", err)

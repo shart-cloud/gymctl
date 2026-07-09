@@ -7,16 +7,6 @@ import (
 	"path/filepath"
 )
 
-// newExecCmd creates an exec.Cmd for the given shell with the working directory set.
-func newExecCmd(shell, workdir string) *exec.Cmd {
-	cmd := exec.Command(shell)
-	cmd.Dir = workdir
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd
-}
-
 // newGymctlStartCmd creates an exec.Cmd that runs `gymctl --tasks-dir <dir> start <name>`.
 func newGymctlStartCmd(tasksDir, exerciseName string) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], "--tasks-dir", tasksDir, "start", exerciseName)

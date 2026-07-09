@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gymctl/internal/dialogue"
+	"gymctl/internal/pet"
 	"gymctl/internal/progress"
 	"gymctl/internal/scenario"
 )
@@ -160,7 +160,7 @@ func newHintCmd() *cobra.Command {
 				return writeJSON(cmd.OutOrStdout(), response)
 			}
 
-			dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(exercise.Spec.JerryDialog, "onHintUsed", exercise.Metadata.Name))
+			pet.RenderCLI(cmd.OutOrStdout(), exercise.Spec.JerryDialog, "onHintUsed", exercise.Metadata.Name)
 			fmt.Fprintln(cmd.OutOrStdout())
 			if remaining == 0 {
 				ColorDim.Fprintln(cmd.OutOrStdout(), "  No more hints available.")

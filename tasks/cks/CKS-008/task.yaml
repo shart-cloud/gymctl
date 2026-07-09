@@ -83,13 +83,6 @@ spec:
   successMessage: |
     CKS-008 complete. You remediated the target CKS scenario and verified the controls.
 
-  tasking:
-    ticket: "CKS-008"
-    priority: "P2"
-    summary: "Kubernetes Version Upgrade for CVE Remediation"
-    description: "Scaffolded CKS exercise for Cluster Hardening using vm infrastructure."
-    reporter: "GRIM-9"
-
   jerryDialog:
     onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
     onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."

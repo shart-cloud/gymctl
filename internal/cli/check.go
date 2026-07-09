@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"gymctl/internal/checks"
-	"gymctl/internal/dialogue"
 	"gymctl/internal/environment"
+	"gymctl/internal/pet"
 	"gymctl/internal/progress"
 	"gymctl/internal/scenario"
 )
@@ -245,9 +245,10 @@ func newCheckCmd() *cobra.Command {
 				if err := markCompleted(exercise); err != nil {
 					return err
 				}
-				dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(exercise.Spec.JerryDialog, "onComplete", exercise.Metadata.Name))
+				pet.RenderCLI(cmd.OutOrStdout(), exercise.Spec.JerryDialog, "onComplete", exercise.Metadata.Name)
 				fmt.Fprintln(cmd.OutOrStdout())
 				ColorSuccess.Fprintln(cmd.OutOrStdout(), "🎉 Exercise complete! Well done!")
+				printSuccessMessage(cmd.OutOrStdout(), exercise.Spec.SuccessMessage)
 
 				// Run cleanup hook if not disabled
 				if !opts.noCleanup {
@@ -265,7 +266,7 @@ func newCheckCmd() *cobra.Command {
 				return nil
 			}
 
-			dialogue.RenderJerry(cmd.OutOrStdout(), dialogue.Jerry(exercise.Spec.JerryDialog, "onCheckFail", exercise.Metadata.Name))
+			pet.RenderCLI(cmd.OutOrStdout(), exercise.Spec.JerryDialog, "onCheckFail", exercise.Metadata.Name)
 			fmt.Fprintln(cmd.OutOrStdout())
 			ColorWarning.Fprintf(cmd.OutOrStdout(), "⚠ Exercise not complete. %d/%d checks passed.\n", passedCount, totalCount)
 			if len(mcqResults) > 0 {

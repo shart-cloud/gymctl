@@ -108,15 +108,12 @@ spec:
     a missing key silently produces an empty variable, which is easy to miss until
     the container logic itself catches and fails on the empty value.
 
-  tasking:
-    ticket: "OPS-3401"
-    priority: "P2"
+  brief:
     summary: "jerry-init-app pods stuck in Init:CrashLoopBackOff since 11am push"
     description: |
       Jerry's latest deployment has been stuck with all pods in Init:CrashLoopBackOff
       since the 11am push. The DB migration init container fails on every restart.
       No traffic is reaching the app. Investigate and fix immediately.
-    reporter: "SRE-4"
 
   jerryDialog:
     onStart: "the init container just does a simple env print, it should be fine"

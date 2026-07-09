@@ -95,16 +95,13 @@ spec:
     are what make them work. When custom resources aren't reconciling,
     check if their controllers are running.
 
-  tasking:
-    ticket: "OPS-3142"
-    priority: "P1"
+  brief:
     summary: "ArgoCD Application stuck in Unknown status, never syncs"
     description: |
       Jerry's ArgoCD Application has been stuck in "Unknown" sync status for hours.
       The Application resource exists but nothing is happening. GitOps is broken.
 
       This is blocking our deployment pipeline.
-    reporter: "DEVX-12"
 
   jerryDialog:
     onStart: "the application yaml looks right, i copied it from the docs"

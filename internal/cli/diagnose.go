@@ -437,16 +437,6 @@ func checkContainer(cmd *cobra.Command, ctx context.Context, name string, verbos
 	}
 }
 
-func checkNetwork(cmd *cobra.Command, ctx context.Context, name string, verbose bool) {
-	execCmd := exec.CommandContext(ctx, "docker", "network", "ls", "--filter", fmt.Sprintf("name=%s", name), "--format", "{{.Name}}")
-	output, err := execCmd.Output()
-	if err != nil || strings.TrimSpace(string(output)) == "" {
-		ColorWarning.Fprintf(cmd.OutOrStdout(), "    %s Network '%s' not found\n", IconWarning, name)
-		return
-	}
-	ColorSuccess.Fprintf(cmd.OutOrStdout(), "    %s Network '%s' exists\n", IconSuccess, name)
-}
-
 func checkKindCluster(cmd *cobra.Command, ctx context.Context, name string, verbose bool) {
 	execCmd := exec.CommandContext(ctx, "kind", "get", "clusters")
 	output, err := execCmd.Output()

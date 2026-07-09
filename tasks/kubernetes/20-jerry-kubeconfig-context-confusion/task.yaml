@@ -102,15 +102,12 @@ spec:
     **Key takeaway:** when kubectl suddenly fails, check your active context
     before debugging cluster resources.
 
-  tasking:
-    ticket: "OPS-2102"
-    priority: "P1"
+  brief:
     summary: "kubectl commands are targeting the wrong cluster context"
     description: |
       Jerry left kubeconfig in a dead context. Incident responders cannot run
       even basic diagnostics because kubectl points at an invalid API server.
       Restore command targeting to the correct cluster immediately.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "i was testing another cluster and forgot to switch back"

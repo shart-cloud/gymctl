@@ -25,6 +25,15 @@ func writeJSON(out io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
+func printSuccessMessage(out io.Writer, message string) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+	fmt.Fprintln(out)
+	ColorSuccess.Fprintln(out, message)
+}
+
 func jsonStatus(status string) string {
 	switch strings.ToLower(status) {
 	case "completed":

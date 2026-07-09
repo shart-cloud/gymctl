@@ -6,13 +6,21 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gymctl/internal/runner"
 	"gymctl/internal/scenario"
 )
 
+const (
+	DockerManagedLabel             = "gymctl.managed"
+	DockerExerciseLabel            = "gymctl.exercise"
+	DockerLegacyComposeProjectName = "jerry-gym"
+)
+
 type DockerManager struct {
-	WorkDir string
+	WorkDir      string
+	ExerciseName string
 }
 
 func (d DockerManager) Setup(ctx context.Context, entryDir string, spec scenario.DockerSpec) error {
@@ -31,7 +39,7 @@ func (d DockerManager) Setup(ctx context.Context, entryDir string, spec scenario
 	if spec.ComposeFile != "" {
 		composePath := resolvePath(entryDir, spec.ComposeFile)
 		composeDir := filepath.Dir(composePath)
-		_, err := runner.RunInDir(ctx, composeDir, "docker", "compose", "-p", "jerry-gym", "-f", composePath, "up", "-d")
+		_, err := runner.RunInDir(ctx, composeDir, "docker", "compose", "-p", DockerComposeProjectName(d.ExerciseName), "-f", composePath, "up", "-d")
 		return err
 	}
 
@@ -41,7 +49,10 @@ func (d DockerManager) Setup(ctx context.Context, entryDir string, spec scenario
 			if container.Build != "" {
 				image = fmt.Sprintf("%s:latest", container.Name)
 				buildPath := resolvePath(entryDir, container.Build)
-				if _, err := runner.RunInDir(ctx, buildPath, "docker", "build", "-t", image, "."); err != nil {
+				args := []string{"build", "-t", image}
+				args = appendDockerLabels(args, d.ExerciseName)
+				args = append(args, ".")
+				if _, err := runner.RunInDir(ctx, buildPath, "docker", args...); err != nil {
 					return err
 				}
 			}
@@ -49,6 +60,7 @@ func (d DockerManager) Setup(ctx context.Context, entryDir string, spec scenario
 				return fmt.Errorf("container %s missing image or build", container.Name)
 			}
 			args := []string{"run", "-d", "--name", container.Name}
+			args = appendDockerLabels(args, d.ExerciseName)
 			for _, port := range container.Ports {
 				args = append(args, "-p", port)
 			}
@@ -67,9 +79,11 @@ func (d DockerManager) Teardown(ctx context.Context, entryDir string, spec scena
 	if spec.ComposeFile != "" {
 		composePath := resolvePath(entryDir, spec.ComposeFile)
 		composeDir := filepath.Dir(composePath)
-		_, err := runner.RunInDir(ctx, composeDir, "docker", "compose", "-p", "jerry-gym", "-f", composePath, "down", "-v")
-		if err != nil {
-			return err
+		for _, projectName := range dockerComposeTeardownProjectNames(d.ExerciseName) {
+			_, err := runner.RunInDir(ctx, composeDir, "docker", "compose", "-p", projectName, "-f", composePath, "down", "-v")
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -84,6 +98,45 @@ func (d DockerManager) Teardown(ctx context.Context, entryDir string, spec scena
 	}
 
 	return nil
+}
+
+func appendDockerLabels(args []string, exerciseName string) []string {
+	args = append(args, "--label", DockerManagedLabel+"=true")
+	if strings.TrimSpace(exerciseName) != "" {
+		args = append(args, "--label", DockerExerciseLabel+"="+exerciseName)
+	}
+	return args
+}
+
+func DockerComposeProjectName(exerciseName string) string {
+	name := strings.ToLower(strings.TrimSpace(exerciseName))
+	var b strings.Builder
+	lastHyphen := false
+	for _, r := range name {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if valid {
+			b.WriteRune(r)
+			lastHyphen = false
+			continue
+		}
+		if !lastHyphen && b.Len() > 0 {
+			b.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+	cleaned := strings.Trim(b.String(), "-")
+	if cleaned == "" {
+		return "gymctl"
+	}
+	return "gymctl-" + cleaned
+}
+
+func dockerComposeTeardownProjectNames(exerciseName string) []string {
+	current := DockerComposeProjectName(exerciseName)
+	if current == DockerLegacyComposeProjectName {
+		return []string{current}
+	}
+	return []string{current, DockerLegacyComposeProjectName}
 }
 
 func resolvePath(baseDir string, value string) string {

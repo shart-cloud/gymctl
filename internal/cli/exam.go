@@ -22,6 +22,7 @@ type examOptions struct {
 	seed            int64
 	backend         string
 	domainBalanced  bool
+	includeScaffold bool
 }
 
 type examSession struct {
@@ -73,6 +74,7 @@ func newExamCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			entries = filterScaffoldEntries(entries, opts.includeScaffold)
 
 			candidates := filterExamCandidates(entries, def, backend)
 			if len(candidates) == 0 {
@@ -122,6 +124,7 @@ func newExamCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&opts.seed, "seed", 0, "Random seed for reproducible task selection")
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "Backend for this exam run (defaults by exam)")
 	cmd.Flags().BoolVar(&opts.domainBalanced, "domain-balanced", true, "Bias task selection to exam domain spread")
+	cmd.Flags().BoolVar(&opts.includeScaffold, "include-scaffold", false, "Include scaffolded exercises")
 
 	return cmd
 }
@@ -197,6 +200,18 @@ func isBackendCompatible(entry scenario.CatalogEntry, def internalexam.Definitio
 
 	if entry.Exercise == nil || entry.Exercise.Spec.Environment.Type != "kubernetes" {
 		return false
+	}
+
+	if strings.EqualFold(def.ID, "cks") {
+		ex := entry.Exercise
+		if ex == nil || ex.Spec.Environment.Kubernetes == nil {
+			return false
+		}
+		isVagrant := strings.EqualFold(ex.Spec.Environment.Kubernetes.Provider, "vagrant")
+		if backend == "vagrant" {
+			return isVagrant
+		}
+		return !isVagrant
 	}
 
 	if backend != "vagrant" {
@@ -419,6 +434,9 @@ func classifyDomain(ex *scenario.Exercise, def internalexam.Definition) string {
 	if strings.HasPrefix(strings.ToLower(def.ID), "gx-") {
 		return classifyGXDomain(ex, def)
 	}
+	if strings.EqualFold(def.ID, "cks") {
+		return classifyCKSDomain(ex, def)
+	}
 	return classifyCKADomain(ex)
 }
 
@@ -431,6 +449,26 @@ func classifyGXDomain(ex *scenario.Exercise, def internalexam.Definition) string
 	}
 	domainID := strings.Split(ex.Metadata.GXObjective, ".")[0]
 	return def.DomainNameByID(domainID)
+}
+
+func classifyCKSDomain(ex *scenario.Exercise, def internalexam.Definition) string {
+	if ex == nil || len(def.Domains) == 0 {
+		return ""
+	}
+
+	tags := make(map[string]bool, len(ex.Spec.Tags))
+	for _, tag := range ex.Spec.Tags {
+		tags[strings.ToLower(strings.TrimSpace(tag))] = true
+	}
+
+	for _, domain := range def.Domains {
+		tag := "cks-" + domain.ID
+		if tags[tag] {
+			return domain.Name
+		}
+	}
+
+	return def.Domains[0].Name
 }
 
 func classifyCKADomain(ex *scenario.Exercise) string {

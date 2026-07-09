@@ -83,15 +83,12 @@ spec:
     **Key takeaway:** `Running` does not mean `Ready`. Rollout health depends
     on readiness checks passing for the new pod template.
 
-  tasking:
-    ticket: "OPS-2108"
-    priority: "P1"
+  brief:
     summary: "Deployment rollout blocked by readiness failures"
     description: |
       Jerry's release is stalled and `kubectl rollout status` never finishes.
       Pods start, but service readiness never transitions to healthy. Repair the
       deployment spec so rollout can complete.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "pods are running, so i thought rollout was done"

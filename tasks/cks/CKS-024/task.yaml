@@ -132,13 +132,6 @@ spec:
     - title: "Configure a Security Context for a Pod or Container"
       url: "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
 
-  tasking:
-    ticket: "CKS-024"
-    priority: "P1"
-    summary: "Immutable Container Enforcement"
-    description: "web, api, cache run with writable root filesystems. Make them immutable with read-only roots + emptyDir scratch, no privilege escalation."
-    reporter: "GRIM-9"
-
   jerryDialog:
     onStart: "Jerry's production containers all have writable disks. An attacker can rewrite them from the inside. Make them immutable."
     onCheckFail: "Not immutable yet, or you made one so immutable it can't start. All three have to be read-only AND Available."

@@ -106,15 +106,12 @@ spec:
     `.items[*].spec.containers[*].image`. Add `--sort-by=.metadata.creationTimestamp`
     to order results by age.
 
-  tasking:
-    ticket: "TOOLS-0891"
-    priority: "P3"
+  brief:
     summary: "kubectl extraction script produces empty output for all queries"
     description: |
       Jerry wrote a jsonpath script to pull pod info for our weekly capacity report.
       All four queries return empty strings. The script is at /tmp/jerry-jsonpath-broken.sh.
       Fix it so the report pipeline can run tonight.
-    reporter: "OPS-TEAM"
 
   jerryDialog:
     onStart: "jsonpath is basically jq right, how hard can it be"

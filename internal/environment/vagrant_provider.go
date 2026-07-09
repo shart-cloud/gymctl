@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -19,47 +17,6 @@ type VagrantProvider struct{}
 
 func (p *VagrantProvider) Name() string {
 	return KubernetesProviderVagrant
-}
-
-// checkVagrantDeps verifies that vagrant and VBoxManage are in PATH and
-// returns an actionable error message if either is missing.
-func checkVagrantDeps() error {
-	if _, err := exec.LookPath("vagrant"); err != nil {
-		var hint string
-		switch runtime.GOOS {
-		case "windows":
-			hint = "Install Vagrant from https://developer.hashicorp.com/vagrant/downloads\n" +
-				"After installation, restart your terminal so the PATH is updated."
-		case "darwin":
-			hint = "Install Vagrant: brew install --cask vagrant\n" +
-				"Or download from https://developer.hashicorp.com/vagrant/downloads"
-		default:
-			hint = "Install Vagrant from https://developer.hashicorp.com/vagrant/downloads"
-		}
-		return fmt.Errorf("vagrant not found in PATH\n\n%s", hint)
-	}
-
-	// VBoxManage is the VirtualBox management CLI; it ships with VirtualBox.
-	vboxCmd := "VBoxManage"
-	if runtime.GOOS == "windows" {
-		vboxCmd = "VBoxManage.exe"
-	}
-	if _, err := exec.LookPath(vboxCmd); err != nil {
-		var hint string
-		switch runtime.GOOS {
-		case "windows":
-			hint = "Install VirtualBox from https://www.virtualbox.org/wiki/Downloads\n" +
-				"After installation, restart your terminal so the PATH is updated."
-		case "darwin":
-			hint = "Install VirtualBox: brew install --cask virtualbox\n" +
-				"Or download from https://www.virtualbox.org/wiki/Downloads"
-		default:
-			hint = "Install VirtualBox from https://www.virtualbox.org/wiki/Downloads"
-		}
-		return fmt.Errorf("VBoxManage not found in PATH — is VirtualBox installed?\n\n%s", hint)
-	}
-
-	return nil
 }
 
 func (p *VagrantProvider) Ensure(ctx context.Context, entryDir string, spec *scenario.KubernetesSpec, state *ExerciseState) error {

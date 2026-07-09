@@ -126,15 +126,12 @@ spec:
     **Key takeaway:** for static pod outages, inspect the node-local manifest
     first. Fixing `/etc/kubernetes/manifests/*.yaml` is often the fastest path.
 
-  tasking:
-    ticket: "OPS-2077"
-    priority: "P0"
+  brief:
     summary: "New workloads are stuck Pending after control-plane maintenance"
     description: |
       Jerry changed a static pod manifest on the control-plane node. The
       scheduler is no longer healthy, and new pods cannot be assigned to any
       node. Restore scheduler functionality immediately.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "i only changed one flag in a yaml under /etc/kubernetes/manifests"

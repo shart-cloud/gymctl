@@ -16,7 +16,7 @@ import (
 	"golang.org/x/term"
 
 	"gymctl/internal/checks"
-	"gymctl/internal/dialogue"
+	"gymctl/internal/pet"
 	"gymctl/internal/scenario"
 )
 
@@ -205,7 +205,7 @@ func runChecksAndRender(ctx context.Context, cmd *cobra.Command, entry *scenario
 	renderWatchFrame(out, entry, results, allPassed, time.Now(), workDir, opts)
 
 	if passedCount > prevPassCount && !allPassed && prevPassCount >= 0 {
-		dialogue.RenderJerry(out, dialogue.Jerry(entry.Exercise.Spec.JerryDialog, "onCheckPass", entry.Exercise.Metadata.Name))
+		pet.RenderCLI(out, entry.Exercise.Spec.JerryDialog, "onCheckPass", entry.Exercise.Metadata.Name)
 		fmt.Fprintln(out)
 	}
 
@@ -213,9 +213,10 @@ func runChecksAndRender(ctx context.Context, cmd *cobra.Command, entry *scenario
 		if err := markCompleted(entry.Exercise); err != nil {
 			ColorDim.Fprintf(out, "  warning: could not save progress: %v\n", err)
 		}
-		dialogue.RenderJerry(out, dialogue.Jerry(entry.Exercise.Spec.JerryDialog, "onComplete", entry.Exercise.Metadata.Name))
+		pet.RenderCLI(out, entry.Exercise.Spec.JerryDialog, "onComplete", entry.Exercise.Metadata.Name)
 		fmt.Fprintln(out)
-		ColorSuccess.Fprintln(out, "Exercise complete! GRIM-9 has closed the ticket.")
+		ColorSuccess.Fprintln(out, "Exercise complete!")
+		printSuccessMessage(out, entry.Exercise.Spec.SuccessMessage)
 		cleanupConfig := &CleanupConfig{
 			AutoClean:       false,
 			SkipClean:       false,
@@ -259,7 +260,7 @@ func renderWatchFrame(w io.Writer, entry *scenario.CatalogEntry, results []check
 	fmt.Fprintln(w)
 
 	if !allPassed {
-		dialogue.RenderJerry(w, dialogue.Jerry(entry.Exercise.Spec.JerryDialog, "onCheckFail", entry.Exercise.Metadata.Name))
+		pet.RenderCLI(w, entry.Exercise.Spec.JerryDialog, "onCheckFail", entry.Exercise.Metadata.Name)
 		fmt.Fprintln(w)
 		ColorDim.Fprintln(w, "  Press Ctrl+C to stop watching.")
 	}

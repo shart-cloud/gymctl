@@ -2,194 +2,122 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 )
 
-var (
-	ColorBrand     = lipgloss.Color("#56D4E6")
-	ColorSecondary = lipgloss.Color("#F6C177")
-	ColorAccent    = lipgloss.Color("#9CCFD8")
-	ColorSuccess   = lipgloss.Color("#8BD49C")
-	ColorWarning   = lipgloss.Color("#F2AE49")
-	ColorError     = lipgloss.Color("#E26D5C")
-	ColorText      = lipgloss.Color("#E8E6E3")
-	ColorTextDim   = lipgloss.Color("#7F7B77")
-	ColorBg        = lipgloss.Color("#12161B")
-	ColorBgSecond  = lipgloss.Color("#1B222A")
+// The palette is deliberately near-monochrome: text / dim / faint, plus ONE
+// accent reserved for state (active selection, progress fill, the pet's mood,
+// success). Failure is the single exception — it gets its own red so "broken"
+// always reads as broken. Set GYMCTL_ACCENT=#RRGGBB to recolor the accent.
 
-	// Header / track with gradient effect
-	StyleHeader = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ColorBrand).
-			Background(ColorBg)
-
-	StyleTrack = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ColorBrand).
-			Background(ColorBgSecond).
-			Padding(0, 1).
-			MarginBottom(1)
-
-	// Enhanced status styles with background
-	StyleSuccess = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#000")).
-			Background(ColorSuccess).
-			Padding(0, 1)
-
-	StyleWarning = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#000")).
-			Background(ColorWarning).
-			Padding(0, 1)
-
-	StyleError = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FFF")).
-			Background(ColorError).
-			Padding(0, 1)
-
-	StyleDim = lipgloss.NewStyle().
-			Foreground(ColorTextDim)
-
-	// Priority with enhanced styling
-	StyleP0 = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFF")).
-		Background(ColorError).
-		Padding(0, 1)
-
-	StyleP1 = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#000")).
-		Background(ColorWarning).
-		Padding(0, 1)
-
-	StyleP2 = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#000")).
-		Background(ColorAccent).
-		Padding(0, 1)
-
-	StyleP3 = lipgloss.NewStyle().
-		Foreground(ColorTextDim).
-		Background(ColorBgSecond).
-		Padding(0, 1)
-
-	// Enhanced selection highlight with border
-	StyleSelected = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ColorBg).
-			Background(ColorSecondary).
-			Padding(0, 1)
-
-	// Enhanced boxes and containers
-	StyleBox = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorSecondary).
-			Background(ColorBgSecond).
-			Padding(1, 2)
-
-	StyleTicketBox = lipgloss.NewStyle().
-			Border(lipgloss.DoubleBorder()).
-			BorderForeground(ColorBrand).
-			Background(ColorBg).
-			Padding(1, 2).
-			MarginBottom(1)
-
-	// Ticket border
-	StyleTicketBorder = lipgloss.NewStyle().
-				Foreground(ColorBrand)
-
-	// Enhanced body text
-	StyleBody = lipgloss.NewStyle().
-			Foreground(ColorText)
-
-	// Enhanced footer with better contrast
-	StyleKey = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ColorBrand).
-			Background(ColorBgSecond).
-			Padding(0, 1)
-
-	StyleFooter = lipgloss.NewStyle().
-			Foreground(ColorTextDim)
-
-	// Enhanced difficulty badges
-	StyleEasy = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#000")).
-			Background(ColorSuccess).
-			Padding(0, 1)
-
-	StyleMedium = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#000")).
-			Background(ColorWarning).
-			Padding(0, 1)
-
-	StyleHard = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FFF")).
-			Background(ColorError).
-			Padding(0, 1)
-
-	// Enhanced section title with underline accent
-	StyleSectionTitle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(ColorSecondary).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderBottom(true).
-				BorderForeground(ColorAccent).
-				MarginBottom(1)
-
-	// Enhanced progress bar with gradients
-	StyleBarFill = lipgloss.NewStyle().
-			Foreground(ColorSuccess).
-			Background(ColorBgSecond)
-
-	StyleBarEmpty = lipgloss.NewStyle().
-			Foreground(ColorTextDim).
-			Background(ColorBg)
-
-	// New styles for enhanced UI elements
-	StyleBadge = lipgloss.NewStyle().
-			Bold(true).
-			Padding(0, 1).
-			Border(lipgloss.RoundedBorder())
-
-	StyleCard = lipgloss.NewStyle().
-			Background(ColorBgSecond).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorBrand).
-			Padding(1, 2).
-			MarginBottom(1)
-
-	StyleCardTitle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ColorSecondary)
-
-	StyleCardBody = lipgloss.NewStyle().
-			Foreground(ColorText)
-
-	StyleHighlight = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ColorAccent)
+const (
+	defaultAccentDark  = "#F6C177" // amber
+	defaultAccentLight = "#9A6B00"
 )
 
-func PriorityStyle(priority string) lipgloss.Style {
-	switch priority {
-	case "P0":
-		return StyleP0
-	case "P1":
-		return StyleP1
-	case "P2":
-		return StyleP2
-	default:
-		return StyleP3
+var (
+	ColorAccent  = lipgloss.Color(defaultAccentDark)
+	ColorError   = lipgloss.Color("#E26D5C")
+	ColorText    = lipgloss.Color("#D7D5D1")
+	ColorTextDim = lipgloss.Color("#8A8782")
+	ColorFaint   = lipgloss.Color("#565450")
+)
+
+// accentHex resolves the accent hex: GYMCTL_ACCENT env override wins, else the
+// per-theme default.
+func accentHex(isDark bool) string {
+	if hex := strings.TrimSpace(os.Getenv("GYMCTL_ACCENT")); hex != "" {
+		return hex
 	}
+	if isDark {
+		return defaultAccentDark
+	}
+	return defaultAccentLight
+}
+
+var (
+	// Header / breadcrumb / track label.
+	StyleHeader lipgloss.Style
+	StyleTrack  lipgloss.Style
+
+	// State styles. Success folds into the accent; only error keeps its own hue.
+	StyleSuccess lipgloss.Style
+	StyleWarning lipgloss.Style
+	StyleError   lipgloss.Style
+	StyleDim     lipgloss.Style
+
+	// Selected list row.
+	StyleSelected lipgloss.Style
+
+	// Thin rules / brief chrome.
+	StyleTicketBorder lipgloss.Style
+
+	StyleBody lipgloss.Style
+
+	StyleKey    lipgloss.Style
+	StyleFooter lipgloss.Style
+
+	// Difficulty — plain text weights, no badges.
+	StyleEasy   lipgloss.Style
+	StyleMedium lipgloss.Style
+	StyleHard   lipgloss.Style
+
+	StyleSectionTitle lipgloss.Style
+
+	StyleBarFill  lipgloss.Style
+	StyleBarEmpty lipgloss.Style
+
+	// Panels are flat now: a dim title over indented body, no border, no fill.
+	StyleCard      lipgloss.Style
+	StyleCardTitle lipgloss.Style
+	StyleCardBody  lipgloss.Style
+	StyleHighlight lipgloss.Style
+)
+
+func init() {
+	buildStyles()
+}
+
+// buildStyles reconstructs all Style* vars from the current Color* values.
+func buildStyles() {
+	accent := lipgloss.NewStyle().Foreground(ColorAccent)
+	dim := lipgloss.NewStyle().Foreground(ColorTextDim)
+	faint := lipgloss.NewStyle().Foreground(ColorFaint)
+	text := lipgloss.NewStyle().Foreground(ColorText)
+
+	StyleHeader = dim
+	StyleTrack = accent.Bold(true)
+
+	StyleSuccess = accent
+	StyleWarning = accent
+	StyleError = lipgloss.NewStyle().Foreground(ColorError)
+	StyleDim = faint
+
+	StyleSelected = accent.Bold(true)
+
+	StyleTicketBorder = faint
+
+	StyleBody = text
+
+	StyleKey = accent.Bold(true)
+	StyleFooter = dim
+
+	StyleEasy = faint
+	StyleMedium = dim
+	StyleHard = accent
+
+	StyleSectionTitle = dim.Bold(true)
+
+	StyleBarFill = accent
+	StyleBarEmpty = faint
+
+	StyleCard = lipgloss.NewStyle()
+	StyleCardTitle = dim
+	StyleCardBody = text
+	StyleHighlight = accent
 }
 
 func DifficultyStyle(difficulty string) lipgloss.Style {
@@ -205,249 +133,43 @@ func DifficultyStyle(difficulty string) lipgloss.Style {
 	}
 }
 
-// Enhanced progress bar with better visual design
+// renderProgressBar draws a flat accent/faint bar: ▓ for filled, ░ for empty.
 func renderProgressBar(current, total, width int) string {
 	if total == 0 {
-		return StyleBarEmpty.Render("[ No exercises ]")
+		return StyleBarEmpty.Render("no exercises")
 	}
 
-	percentage := 0
-	if total > 0 {
-		percentage = (current * 100) / total
-	}
+	percentage := (current * 100) / total
+	filled := (current * width) / total
 
-	filled := 0
-	if total > 0 {
-		filled = (current * width) / total
-	}
-
-	// Create progress bar with different fill characters
-	bar := ""
+	var bar strings.Builder
 	for i := 0; i < width; i++ {
 		if i < filled {
-			if i == filled-1 && filled < width {
-				// Partial fill character at the boundary
-				bar += StyleBarFill.Render("▶")
-			} else {
-				bar += StyleBarFill.Render("█")
-			}
+			bar.WriteString(StyleBarFill.Render("▓"))
 		} else {
-			bar += StyleBarEmpty.Render("░")
+			bar.WriteString(StyleBarEmpty.Render("░"))
 		}
 	}
-
-	// Add percentage
-	percentStr := fmt.Sprintf(" %d%%", percentage)
-
-	return StyleTicketBorder.Render("[") +
-		bar +
-		StyleTicketBorder.Render("]") +
-		StyleHighlight.Render(percentStr)
+	return bar.String() + StyleHighlight.Render(fmt.Sprintf(" %d%%", percentage))
 }
 
-// renderGRIMHeader renders the banner, fitting to the available terminal width.
-func renderGRIMHeader(termWidth int) string {
-	const minInner = 50
-	const maxInner = 75
-
-	inner := termWidth - 4 // 2-char indent + 1 border char each side
-	if inner < minInner {
-		inner = minInner
-	}
-	if inner > maxInner {
-		inner = maxInner
-	}
-
-	pad := strings.Repeat("━", inner)
-	line1 := centerText("GRIM-9 // OPS DESK v2", inner)
-	line2 := centerText("Incident Sim Lab • Ticket Arcade • Co-op Mode", inner)
-
-	header := fmt.Sprintf("  ┏%s┓\n  ┃%s┃\n  ┃%s┃\n  ┗%s┛", pad, line1, line2, pad)
-	return StyleHeader.Render(header)
-}
-
-// centerText pads s with spaces so its display width equals width.
-// Uses lipgloss.Width so multi-byte Unicode chars are measured correctly.
-func centerText(s string, width int) string {
-	sWidth := lipgloss.Width(s)
-	if sWidth >= width {
-		return s
-	}
-	total := width - sWidth
-	left := total / 2
-	right := total - left
-	return strings.Repeat(" ", left) + s + strings.Repeat(" ", right)
+// renderHomeHeader renders the minimal home breadcrumb — no banner, no box.
+func renderHomeHeader() string {
+	return StyleHeader.Render("gymctl") +
+		StyleTicketBorder.Render(" · ") +
+		StyleHeader.Render("jerry's gym")
 }
 
 func applyTheme(isDark bool) {
+	ColorAccent = lipgloss.Color(accentHex(isDark))
 	if isDark {
-		ColorBrand = lipgloss.Color("#56D4E6")
-		ColorSecondary = lipgloss.Color("#F6C177")
-		ColorAccent = lipgloss.Color("#9CCFD8")
-		ColorSuccess = lipgloss.Color("#8BD49C")
-		ColorWarning = lipgloss.Color("#F2AE49")
-		ColorError = lipgloss.Color("#E26D5C")
-		ColorText = lipgloss.Color("#E8E6E3")
-		ColorTextDim = lipgloss.Color("#7F7B77")
-		ColorBg = lipgloss.Color("#12161B")
-		ColorBgSecond = lipgloss.Color("#1B222A")
+		ColorText = lipgloss.Color("#D7D5D1")
+		ColorTextDim = lipgloss.Color("#8A8782")
+		ColorFaint = lipgloss.Color("#565450")
 	} else {
-		ColorBrand = lipgloss.Color("#00778B")
-		ColorSecondary = lipgloss.Color("#9C4D00")
-		ColorAccent = lipgloss.Color("#0C8E8A")
-		ColorSuccess = lipgloss.Color("#53A66C")
-		ColorWarning = lipgloss.Color("#D68E2B")
-		ColorError = lipgloss.Color("#B2473B")
 		ColorText = lipgloss.Color("#20242B")
 		ColorTextDim = lipgloss.Color("#6F7480")
-		ColorBg = lipgloss.Color("#F4F7FA")
-		ColorBgSecond = lipgloss.Color("#E8EEF4")
+		ColorFaint = lipgloss.Color("#A9AEB6")
 	}
-
-	StyleHeader = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(ColorBrand).
-		Background(ColorBg)
-
-	StyleTrack = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(ColorBrand).
-		Background(ColorBgSecond).
-		Padding(0, 1).
-		MarginBottom(1)
-
-	StyleSuccess = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#000")).
-		Background(ColorSuccess).
-		Padding(0, 1)
-
-	StyleWarning = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#000")).
-		Background(ColorWarning).
-		Padding(0, 1)
-
-	StyleError = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFF")).
-		Background(ColorError).
-		Padding(0, 1)
-
-	StyleDim = lipgloss.NewStyle().
-		Foreground(ColorTextDim)
-
-	StyleP0 = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFF")).
-		Background(ColorError).
-		Padding(0, 1)
-
-	StyleP1 = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#000")).
-		Background(ColorWarning).
-		Padding(0, 1)
-
-	StyleP2 = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#000")).
-		Background(ColorAccent).
-		Padding(0, 1)
-
-	StyleP3 = lipgloss.NewStyle().
-		Foreground(ColorTextDim).
-		Background(ColorBgSecond).
-		Padding(0, 1)
-
-	StyleSelected = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(ColorBg).
-		Background(ColorSecondary).
-		Padding(0, 1)
-
-	StyleBox = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorSecondary).
-		Background(ColorBgSecond).
-		Padding(1, 2)
-
-	StyleTicketBox = lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
-		BorderForeground(ColorBrand).
-		Background(ColorBg).
-		Padding(1, 2).
-		MarginBottom(1)
-
-	StyleTicketBorder = lipgloss.NewStyle().
-		Foreground(ColorBrand)
-
-	StyleBody = lipgloss.NewStyle().
-		Foreground(ColorText)
-
-	StyleKey = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(ColorBrand).
-		Background(ColorBgSecond).
-		Padding(0, 1)
-
-	StyleFooter = lipgloss.NewStyle().
-		Foreground(ColorTextDim)
-
-	StyleEasy = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#000")).
-		Background(ColorSuccess).
-		Padding(0, 1)
-
-	StyleMedium = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#000")).
-		Background(ColorWarning).
-		Padding(0, 1)
-
-	StyleHard = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFF")).
-		Background(ColorError).
-		Padding(0, 1)
-
-	StyleSectionTitle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(ColorSecondary).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).
-		BorderForeground(ColorAccent).
-		MarginBottom(1)
-
-	StyleBarFill = lipgloss.NewStyle().
-		Foreground(ColorSuccess).
-		Background(ColorBgSecond)
-
-	StyleBarEmpty = lipgloss.NewStyle().
-		Foreground(ColorTextDim).
-		Background(ColorBg)
-
-	StyleBadge = lipgloss.NewStyle().
-		Bold(true).
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder())
-
-	StyleCard = lipgloss.NewStyle().
-		Background(ColorBgSecond).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorBrand).
-		Padding(1, 2).
-		MarginBottom(1)
-
-	StyleCardTitle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(ColorSecondary)
-
-	StyleCardBody = lipgloss.NewStyle().
-		Foreground(ColorText)
-
-	StyleHighlight = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(ColorAccent)
+	buildStyles()
 }

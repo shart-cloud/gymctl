@@ -149,15 +149,12 @@ spec:
     or scheduler. When a static pod manifest is gone, the pod simply disappears;
     there is no CrashLoop, no error — just silence.
 
-  tasking:
-    ticket: "OPS-4812"
-    priority: "P0"
+  brief:
     summary: "All new pods stuck Pending — no scheduler visible in kube-system"
     description: |
       Following Jerry's control-plane cleanup at 14:30, no new pods are being
       scheduled. API server and etcd appear healthy. kube-scheduler is not present
       in kube-system. On-call response required immediately.
-    reporter: "PAGER-1"
 
   jerryDialog:
     onStart: "i was cleaning up yaml files under /etc/kubernetes/manifests and there were so many"

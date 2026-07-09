@@ -129,13 +129,6 @@ spec:
     - title: "Enforce Pod Security Standards with Namespace Labels"
       url: "https://kubernetes.io/docs/tasks/configure-pod-container/enforce-standards-namespace-labels/"
 
-  tasking:
-    ticket: "CKS-016"
-    priority: "P1"
-    summary: "Pod Security Admission"
-    description: "Two namespaces have no PSA. Enforce restricted and baseline standards via namespace labels."
-    reporter: "GRIM-9"
-
   jerryDialog:
     onStart: "Nothing stops Jerry from scheduling a root pod anywhere. Turn on Pod Security Admission and set the bar per namespace."
     onCheckFail: "The labels aren't taking effect the way you expect. Test with a known-bad and a known-good pod using --dry-run=server."

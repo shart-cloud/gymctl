@@ -131,9 +131,7 @@ spec:
     - successfulJobsHistoryLimit and failedJobsHistoryLimit prevent job pile-up
     - For long-running scheduled tasks, Forbid is almost always the right choice
 
-  tasking:
-    ticket: "OPS-2201"
-    priority: "P0"
+  brief:
     summary: "30+ report pods running concurrently, node under pressure"
     description: |
       Jerry left a CronJob running every minute with Allow concurrency during
@@ -142,7 +140,6 @@ spec:
       is at 96% and other workloads are being evicted.
 
       Fix the CronJob config and clean up the job pile immediately.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "i just set it to every minute for testing, i thought it would replace the old one"

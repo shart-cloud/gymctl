@@ -17,7 +17,7 @@ spec:
   description: |
     Jerry gave the CI robot `cluster-admin`. `ci-bot` (ServiceAccount in the
     `dev-team` namespace) can currently do anything, anywhere — including read
-    every Secret in the cluster. GRIM-9 wants least privilege.
+    every Secret in the cluster. The security team wants least privilege.
 
     Replace the cluster-admin grant with exactly these permissions:
 
@@ -133,13 +133,6 @@ spec:
   references:
     - title: "Using RBAC Authorization"
       url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/"
-
-  tasking:
-    ticket: "CKS-005"
-    priority: "P1"
-    summary: "RBAC Least Privilege"
-    description: "ci-bot has cluster-admin. Replace with least-privilege Role/ClusterRole scoped to what CI actually needs."
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "Jerry gave the CI bot the keys to the whole cluster. It can read every secret you own. Take the keys back and hand out only what it needs."

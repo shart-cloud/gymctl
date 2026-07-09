@@ -19,7 +19,15 @@ func newValidateCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "OK: %s (%s)\n", exercise.Metadata.Name, exercise.Metadata.Title)
+			report := validateExerciseReadiness(args[0], exercise)
+			if len(report.Issues) > 0 {
+				for _, issue := range report.Issues {
+					fmt.Fprintf(cmd.ErrOrStderr(), "validation issue: %s\n", issue)
+				}
+				return fmt.Errorf("exercise readiness validation failed for %s", exercise.Metadata.Name)
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "OK: %s (%s) [%s]\n", exercise.Metadata.Name, exercise.Metadata.Title, report.Status)
 			return nil
 		},
 	}

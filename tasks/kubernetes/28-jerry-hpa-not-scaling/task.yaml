@@ -86,16 +86,13 @@ spec:
     **Key takeaway:** HPA requires metrics-server to read CPU/memory utilization.
     In kind clusters, metrics-server needs `--kubelet-insecure-tls` to work with self-signed certs.
 
-  tasking:
-    ticket: "OPS-2847"
-    priority: "P1"
+  brief:
     summary: "HPA not scaling, shows unknown metrics"
     description: |
       Jerry deployed an HPA but it's not working. The target shows `<unknown>/50%`
       and pods aren't scaling despite high CPU load from our load test.
 
       This is blocking our autoscaling rollout to production.
-    reporter: "SITE-REL-7"
 
   jerryDialog:
     onStart: "the hpa yaml looks right to me, i copied it from the docs"

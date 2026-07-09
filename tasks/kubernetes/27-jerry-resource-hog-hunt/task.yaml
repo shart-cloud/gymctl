@@ -138,15 +138,12 @@ spec:
     **Key takeaway:** `kubectl top` identifies the blast radius quickly, but
     stable recovery comes from explicit requests and limits.
 
-  tasking:
-    ticket: "OPS-2091"
-    priority: "P1"
+  brief:
     summary: "Cluster is sluggish due to an unknown workload"
     description: |
       We have node pressure alerts and noisy-neighbor symptoms. Jerry deployed a
       CPU burner and forgot to set resource boundaries. Identify the offender
       with metrics and harden the workload spec.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "everything looks fine to me, maybe kubernetes is just slow today"

@@ -150,7 +150,6 @@ func SetMCQSelection(content []byte, questionID, letter string) ([]byte, error) 
 			currentLine := strings.TrimRight(lines[j], "\r\n")
 			if isClosingFence(currentLine, fenceChar, fenceLen) {
 				closed = true
-				i = j
 				break
 			}
 

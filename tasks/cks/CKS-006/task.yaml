@@ -134,13 +134,6 @@ spec:
     - title: "Configure Service Accounts for Pods"
       url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/"
 
-  tasking:
-    ticket: "CKS-006"
-    priority: "P1"
-    summary: "Service Account Hardening"
-    description: "Workloads in production mount unused SA tokens. Disable automount except where needed and scope the one that is."
-    reporter: "GRIM-9"
-
   jerryDialog:
     onStart: "Every pod in production is carrying an API token it never uses. That's a free credential for any attacker who lands one shell. Take them away."
     onCheckFail: "Some pod still has a token it shouldn't, or the one that needs it lost it. Check each pod's mount."

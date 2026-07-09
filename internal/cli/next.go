@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gymctl/internal/dialogue"
+	"gymctl/internal/pet"
 	"gymctl/internal/progress"
 	"gymctl/internal/scenario"
 	"gymctl/internal/ui"
@@ -15,18 +15,20 @@ import (
 
 func newNextCmd() *cobra.Command {
 	opts := struct {
-		track string
+		track           string
+		includeScaffold bool
 	}{}
 
 	cmd := &cobra.Command{
 		Use:   "next",
-		Short: "Show your next assignment from GRIM",
+		Short: "Show your next recommended exercise",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			entries, err := loadCatalogEntries()
 			if err != nil {
 				return HandleCommandError(cmd, err)
 			}
+			entries = filterScaffoldEntries(entries, opts.includeScaffold)
 
 			progressPath, err := resolveProgressFile()
 			if err != nil {
@@ -75,11 +77,11 @@ func newNextCmd() *cobra.Command {
 			if len(inProgress) > 0 {
 				ex := inProgress[0].entry.Exercise
 				fmt.Fprintln(out)
-				ColorInfo.Fprintln(out, "  GRIM-9: You have an exercise in progress.")
+				ColorInfo.Fprintln(out, "  you have an exercise in progress.")
 				fmt.Fprintln(out)
-				ui.RenderGRIMTicket(out, ex.Spec.Tasking, ex.Metadata.Name, ex.Spec.Description)
+				ui.RenderBrief(out, ex.Spec.Brief, ex.Metadata.DisplayTitle(), ex.Spec.Description)
 				fmt.Fprintln(out)
-				dialogue.RenderJerry(out, dialogue.Jerry(ex.Spec.JerryDialog, "onStart", ex.Metadata.Name))
+				pet.RenderCLI(out, ex.Spec.JerryDialog, "onStart", ex.Metadata.Name)
 				fmt.Fprintln(out)
 				ColorDim.Fprintf(out, "  Run: gymctl check %s\n", ex.Metadata.Name)
 				fmt.Fprintln(out)
@@ -105,11 +107,11 @@ func newNextCmd() *cobra.Command {
 			if len(available) > 0 {
 				ex := available[0].entry.Exercise
 				fmt.Fprintln(out)
-				ColorInfo.Fprintln(out, "  GRIM-9 has queued your next assignment.")
+				ColorInfo.Fprintln(out, "  next up:")
 				fmt.Fprintln(out)
-				ui.RenderGRIMTicket(out, ex.Spec.Tasking, ex.Metadata.Name, ex.Spec.Description)
+				ui.RenderBrief(out, ex.Spec.Brief, ex.Metadata.DisplayTitle(), ex.Spec.Description)
 				fmt.Fprintln(out)
-				dialogue.RenderJerry(out, dialogue.Jerry(ex.Spec.JerryDialog, "onStart", ex.Metadata.Name))
+				pet.RenderCLI(out, ex.Spec.JerryDialog, "onStart", ex.Metadata.Name)
 				fmt.Fprintln(out)
 				ColorDim.Fprintf(out, "  Run: gymctl start %s\n", ex.Metadata.Name)
 				fmt.Fprintln(out)
@@ -118,15 +120,15 @@ func newNextCmd() *cobra.Command {
 
 			if len(completed) == len(entries) {
 				fmt.Fprintln(out)
-				ColorSuccess.Fprintln(out, "  GRIM-9 MEMO: All tickets resolved. Sprint closed.")
-				ColorDim.Fprintln(out, "  Jerry has been assigned to a different team.")
+				ColorSuccess.Fprintln(out, "  all exercises complete. nice work.")
+				ColorDim.Fprintln(out, "  jerry has been reassigned to another team.")
 				fmt.Fprintln(out)
 				return nil
 			}
 
 			// Only locked exercises remain
 			fmt.Fprintln(out)
-			ColorWarning.Fprintln(out, "  GRIM-9: All available exercises are complete.")
+			ColorWarning.Fprintln(out, "  all available exercises are complete.")
 			ColorDim.Fprintf(out, "  %d exercise(s) remain locked pending prerequisites.\n", len(locked))
 			fmt.Fprintln(out)
 			for _, le := range locked {
@@ -140,5 +142,6 @@ func newNextCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&opts.track, "track", "", "Filter by track")
+	cmd.Flags().BoolVar(&opts.includeScaffold, "include-scaffold", false, "Include scaffolded exercises")
 	return cmd
 }

@@ -17,8 +17,8 @@ spec:
   description: |
     The `payments` namespace runs a two-tier service (`payment-api` and
     `payment-db`) with no NetworkPolicies at all. Every pod can talk to every
-    other pod and to the internet. GRIM-9 flagged it: PCI segmentation is
-    missing.
+    other pod and to the internet. The security team flagged it: PCI
+    segmentation is missing.
 
     Lock it down with a default-deny baseline plus least-privilege allow rules.
     The cluster runs Calico, so NetworkPolicy is actually enforced — a rule that
@@ -187,13 +187,6 @@ spec:
       url: "https://kubernetes.io/docs/concepts/services-networking/network-policies/"
     - title: "Calico: enforce network policy"
       url: "https://docs.tigera.io/calico/latest/network-policy/get-started/kubernetes-policy/"
-
-  tasking:
-    ticket: "CKS-001"
-    priority: "P1"
-    summary: "Network Policy Default Deny"
-    description: "payments namespace has no segmentation. Establish default-deny plus least-privilege allow rules with enforced NetworkPolicy."
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "Jerry left the payments namespace wide open. Every pod can phone home to the internet. Fix the segmentation before the auditors notice."

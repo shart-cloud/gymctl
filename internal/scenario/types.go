@@ -16,24 +16,30 @@ type ExerciseMeta struct {
 	GXObjective string `yaml:"gxObjective,omitempty"`
 }
 
+// DisplayTitle returns the human title, falling back to the name slug.
+func (m ExerciseMeta) DisplayTitle() string {
+	if m.Title != "" {
+		return m.Title
+	}
+	return m.Name
+}
+
 type ExerciseSpec struct {
-	Difficulty       string          `yaml:"difficulty"`
-	EstimatedTime    string          `yaml:"estimatedTime,omitempty"`
-	Points           int             `yaml:"points,omitempty"`
-	Description      string          `yaml:"description"`
-	LearningOutcomes []string        `yaml:"learningOutcomes,omitempty"`
-	Tags             []string        `yaml:"tags,omitempty"`
-	Prerequisites    []string        `yaml:"prerequisites,omitempty"`
-	Environment      EnvironmentSpec `yaml:"environment"`
-	Checks           []Check         `yaml:"checks"`
-	Hints            []Hint          `yaml:"hints"`
-	SuccessMessage   string          `yaml:"successMessage,omitempty"`
-	NextExercise     string          `yaml:"nextExercise,omitempty"`
-	References       []Reference     `yaml:"references,omitempty"`
-	Variants         []Variant       `yaml:"variants,omitempty"`
-	VariantSelection string          `yaml:"variantSelection,omitempty"`
-	JerryDialog      *JerryDialog    `yaml:"jerryDialog,omitempty"`
-	Tasking          *GRIMTasking    `yaml:"tasking,omitempty"`
+	Difficulty           string          `yaml:"difficulty"`
+	EstimatedTime        string          `yaml:"estimatedTime,omitempty"`
+	Points               int             `yaml:"points,omitempty"`
+	ImplementationStatus string          `yaml:"implementationStatus,omitempty"`
+	Description          string          `yaml:"description"`
+	LearningOutcomes     []string        `yaml:"learningOutcomes,omitempty"`
+	Tags                 []string        `yaml:"tags,omitempty"`
+	Prerequisites        []string        `yaml:"prerequisites,omitempty"`
+	Environment          EnvironmentSpec `yaml:"environment"`
+	Checks               []Check         `yaml:"checks"`
+	Hints                []Hint          `yaml:"hints"`
+	SuccessMessage       string          `yaml:"successMessage,omitempty"`
+	References           []Reference     `yaml:"references,omitempty"`
+	JerryDialog          *JerryDialog    `yaml:"jerryDialog,omitempty"`
+	Brief                *Brief          `yaml:"brief,omitempty"`
 }
 
 // JerryDialog holds trigger-keyed voice lines from Jerry.
@@ -45,13 +51,12 @@ type JerryDialog struct {
 	OnComplete  string `yaml:"onComplete,omitempty"`
 }
 
-// GRIMTasking holds the GRIM-9 ticket metadata for an exercise.
-type GRIMTasking struct {
-	Ticket      string `yaml:"ticket"`
-	Priority    string `yaml:"priority"`
+// Brief is the optional incident brief for an exercise. When present it
+// overrides the title (Summary) and body (Description) shown in the exercise
+// brief; when absent, the brief falls back to metadata.title and spec.description.
+type Brief struct {
 	Summary     string `yaml:"summary"`
-	Description string `yaml:"description"`
-	Reporter    string `yaml:"reporter,omitempty"`
+	Description string `yaml:"description,omitempty"`
 }
 
 type EnvironmentSpec struct {
@@ -211,10 +216,4 @@ type NodeExecSpec struct {
 	User    string `yaml:"user,omitempty"`
 	Script  string `yaml:"script,omitempty"`
 	Timeout string `yaml:"timeout,omitempty"`
-}
-
-type Variant struct {
-	Name           string   `yaml:"name"`
-	SetupManifests []string `yaml:"setupManifests,omitempty"`
-	Checks         []Check  `yaml:"checks,omitempty"`
 }

@@ -100,16 +100,13 @@ spec:
     scaling decisions. The fix: set VPA controlledResources to [memory] only,
     and let HPA own CPU replica scaling without interference.
 
-  tasking:
-    ticket: "OPS-3445"
-    priority: "P1"
+  brief:
     summary: "Deployment thrashing — replica count oscillating, constant pod evictions"
     description: |
       Production deployment has been oscillating between 2 and 9 replicas all
       morning. Alert fatigue is high. Root cause: both VPA Auto and HPA are
       controlling CPU on the same deployment. They are fighting each other.
       Fix the autoscaling config so the two controllers don't conflict.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "more autoscaling is better autoscaling, i enabled both"

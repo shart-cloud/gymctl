@@ -20,11 +20,9 @@ var (
 	ColorHeader = color.New(color.FgWhite, color.Bold, color.Underline)
 
 	// Specific element colors
-	ColorTrack      = color.New(color.FgMagenta, color.Bold)
-	ColorExercise   = color.New(color.FgWhite, color.Bold)
-	ColorDifficulty = color.New(color.FgYellow)
-	ColorTime       = color.New(color.FgBlue)
-	ColorProgress   = color.New(color.FgGreen)
+	ColorTrack    = color.New(color.FgMagenta, color.Bold)
+	ColorTime     = color.New(color.FgBlue)
+	ColorProgress = color.New(color.FgGreen)
 
 	// Check status
 	ColorPass = color.New(color.FgGreen)
@@ -39,20 +37,6 @@ var (
 	IconInfo    = "ℹ"
 	IconHint    = "💡"
 )
-
-// DifficultyColor returns appropriate color for difficulty level
-func DifficultyColor(difficulty string) *color.Color {
-	switch strings.ToLower(difficulty) {
-	case "easy":
-		return color.New(color.FgGreen)
-	case "medium":
-		return color.New(color.FgYellow)
-	case "hard":
-		return color.New(color.FgRed)
-	default:
-		return color.New(color.FgWhite)
-	}
-}
 
 // DifficultyBadge returns a colored badge for difficulty
 func DifficultyBadge(difficulty string) string {
@@ -115,9 +99,4 @@ func FormatCheckResult(name string, passed bool, message string) string {
 	}
 
 	return result
-}
-
-// DisableColors disables all colors (useful for non-tty output)
-func DisableColors() {
-	color.NoColor = true
 }

@@ -96,15 +96,12 @@ spec:
     **Key takeaway:** always inspect logs per container (`kubectl logs -c`).
     Healthy sidecars can hide the real failure.
 
-  tasking:
-    ticket: "OPS-2083"
-    priority: "P1"
+  brief:
     summary: "Rollout stuck even though one container looks healthy"
     description: |
       Jerry says the pod is fine because the log shipper container is running.
       Production rollout is still blocked. Find the failing container and fix
       the deployment without removing sidecars.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "the logs are clean... from one of the containers at least"

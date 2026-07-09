@@ -2,7 +2,6 @@ package environment
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -48,8 +47,4 @@ func ResolveManifestPaths(baseDir string, manifests []string) []string {
 		paths = append(paths, filepath.Join(baseDir, manifest))
 	}
 	return paths
-}
-
-func DescribeStart(exerciseTitle string) string {
-	return fmt.Sprintf("Starting exercise: %s", exerciseTitle)
 }

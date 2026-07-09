@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -67,115 +66,76 @@ all the information students need without requiring the full TUI.`,
 func displayExerciseInfo(cmd *cobra.Command, exercise *scenario.Exercise, prog *progress.File) error {
 	out := cmd.OutOrStdout()
 
-	// Header with exercise name and status
+	// Brief — flat title + description, no box-art.
 	fmt.Fprintln(out)
-	ColorHeader.Fprintln(out, "┌─ "+strings.ToUpper(exercise.Metadata.Title)+" ─")
-	ColorDim.Fprintln(out, "│")
+	ui.RenderBrief(out, exercise.Spec.Brief, exercise.Metadata.DisplayTitle(), exercise.Spec.Description)
+	fmt.Fprintln(out)
 
-	// Current status
+	// Status + metadata on a single dim line.
 	status := "not_started"
 	if st, ok := prog.Exercises[exercise.Metadata.Name]; ok {
 		status = st.Status
 	}
-
 	statusText := map[string]string{
-		"not_started": "Not Started",
-		"in_progress": "In Progress",
-		"completed":   "✅ Completed",
+		"not_started": "not started",
+		"in_progress": "in progress",
+		"completed":   "completed ✓",
 	}[status]
 
-	ColorDim.Fprint(out, "│ Status: ")
+	ColorDim.Fprint(out, "  ")
 	switch status {
 	case "completed":
-		ColorSuccess.Fprintln(out, statusText)
+		ColorSuccess.Fprint(out, statusText)
 	case "in_progress":
-		ColorWarning.Fprintln(out, statusText)
+		ColorWarning.Fprint(out, statusText)
 	default:
-		ColorDim.Fprintln(out, statusText)
+		ColorDim.Fprint(out, statusText)
 	}
-
-	// Metadata
-	ColorDim.Fprint(out, "│ Difficulty: ")
-	fmt.Fprintln(out, DifficultyBadge(exercise.Spec.Difficulty))
-
+	meta := []string{DifficultyBadge(exercise.Spec.Difficulty)}
 	if exercise.Spec.EstimatedTime != "" {
-		ColorDim.Fprint(out, "│ Time: ")
-		ColorTime.Fprintln(out, exercise.Spec.EstimatedTime)
+		meta = append(meta, ColorTime.Sprint(exercise.Spec.EstimatedTime))
 	}
-
 	if exercise.Spec.Points > 0 {
-		ColorDim.Fprint(out, "│ Points: ")
-		ColorInfo.Fprintln(out, exercise.Spec.Points)
+		meta = append(meta, fmt.Sprintf("%d pts", exercise.Spec.Points))
 	}
+	ColorDim.Fprintf(out, "   %s\n", strings.Join(meta, "   "))
+	fmt.Fprintln(out)
 
-	ColorDim.Fprintln(out, "│")
-
-	// GRIM Ticket
-	if exercise.Spec.Tasking != nil || exercise.Spec.Description != "" {
-		ui.RenderGRIMTicket(out, exercise.Spec.Tasking, exercise.Metadata.Name, exercise.Spec.Description)
+	// Learning objectives.
+	if len(exercise.Spec.LearningOutcomes) > 0 {
+		ColorDim.Fprintln(out, "  learning objectives")
+		for _, outcome := range exercise.Spec.LearningOutcomes {
+			ColorDim.Fprint(out, "    · ")
+			fmt.Fprintln(out, outcome)
+		}
 		fmt.Fprintln(out)
 	}
 
-	// Description
-	if exercise.Spec.Description != "" {
-		ColorDim.Fprintln(out, "│ Description:")
-		for _, line := range strings.Split(exercise.Spec.Description, "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				ColorDim.Fprint(out, "│   ")
-				fmt.Fprintln(out, line)
-			} else {
-				ColorDim.Fprintln(out, "│")
-			}
-		}
-		ColorDim.Fprintln(out, "│")
-	}
-
-	// Learning outcomes
-	if len(exercise.Spec.LearningOutcomes) > 0 {
-		ColorDim.Fprintln(out, "│ 📝 Learning Objectives:")
-		for _, outcome := range exercise.Spec.LearningOutcomes {
-			ColorDim.Fprint(out, "│   • ")
-			fmt.Fprintln(out, outcome)
-		}
-		ColorDim.Fprintln(out, "│")
-	}
-
-	// Available hints
+	// Available hints.
 	if len(exercise.Spec.Hints) > 0 {
-		ColorDim.Fprintln(out, "│ 💡 Available Hints:")
+		ColorDim.Fprintln(out, "  hints")
 		for i, hint := range exercise.Spec.Hints {
 			if hint.Cost == 0 {
-				ColorDim.Fprintf(out, "│   %d. Free hint - run: ", i+1)
+				ColorDim.Fprintf(out, "    %d. free — ", i+1)
 				ColorInfo.Fprintf(out, "gymctl hint %s\n", exercise.Metadata.Name)
 			} else {
-				ColorDim.Fprintf(out, "│   %d. Costs %d points - run: ", i+1, hint.Cost)
+				ColorDim.Fprintf(out, "    %d. costs %d pts — ", i+1, hint.Cost)
 				ColorInfo.Fprintf(out, "gymctl hint %s --hint %d\n", exercise.Metadata.Name, i+1)
 			}
 		}
-		ColorDim.Fprintln(out, "│")
+		fmt.Fprintln(out)
 	}
 
-	// Current directory info
-	wd, err := os.Getwd()
-	if err == nil {
-		ColorDim.Fprint(out, "│ Work Directory: ")
-		ColorInfo.Fprintln(out, wd)
-		ColorDim.Fprintln(out, "│")
-	}
-
-	// Footer with useful commands
-	ColorDim.Fprintln(out, "│ 🔧 Useful Commands:")
-	ColorDim.Fprint(out, "│   Check progress: ")
+	// Useful commands.
+	ColorDim.Fprintln(out, "  commands")
+	ColorDim.Fprint(out, "    check   ")
 	ColorInfo.Fprintln(out, "gymctl check")
-	ColorDim.Fprint(out, "│   Get hints: ")
+	ColorDim.Fprint(out, "    hint    ")
 	ColorInfo.Fprintln(out, "gymctl hint")
-	ColorDim.Fprint(out, "│   View all exercises: ")
+	ColorDim.Fprint(out, "    list    ")
 	ColorInfo.Fprintln(out, "gymctl list")
-	ColorDim.Fprint(out, "│   Return to TUI: ")
+	ColorDim.Fprint(out, "    tui     ")
 	ColorInfo.Fprintln(out, "gymctl shell")
-
-	ColorDim.Fprintln(out, "└─")
 	fmt.Fprintln(out)
 
 	return nil

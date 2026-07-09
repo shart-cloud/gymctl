@@ -2,7 +2,6 @@ package environment
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -32,12 +31,6 @@ var backendRegistry = map[VagrantBackend]BackendDescriptor{
 	BackendHyperV:     {DisplayName: "Hyper-V", SupportsStaticIP: false},
 	BackendVMware:     {DisplayName: "VMware Desktop", SupportsStaticIP: true},
 	BackendLibvirt:    {DisplayName: "libvirt/KVM", SupportsStaticIP: true},
-}
-
-// LookupDescriptor returns the display descriptor for a backend.
-func LookupDescriptor(backend VagrantBackend) (BackendDescriptor, bool) {
-	d, ok := backendRegistry[backend]
-	return d, ok
 }
 
 // ResolveVagrantBackend determines which Vagrant backend to use via a
@@ -163,10 +156,10 @@ func validateHyperV() error {
 	out, err := exec.Command("powershell", "-NoProfile", "-Command",
 		"(Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V).State").Output()
 	if err != nil || !strings.Contains(strings.TrimSpace(string(out)), "Enabled") {
-		return fmt.Errorf("Hyper-V is not enabled\n\nEnable it with: Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All\nThen restart your computer.")
+		return fmt.Errorf("Hyper-V is not enabled\n\nEnable it with: Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All\nThen restart your computer")
 	}
 	if !isWindowsAdmin() {
-		return fmt.Errorf("Hyper-V requires an administrator terminal\n\nRight-click your terminal and select \"Run as administrator\".")
+		return fmt.Errorf("Hyper-V requires an administrator terminal\n\nRight-click your terminal and select \"Run as administrator\"")
 	}
 	return nil
 }
@@ -280,35 +273,4 @@ func isWindowsAdmin() bool {
 	// "net session" succeeds only when running as administrator.
 	err := exec.Command("cmd", "/C", "net", "session").Run()
 	return err == nil
-}
-
-// pickRoutableIP filters a space-separated list of IPs (from `hostname -I`)
-// and returns the best host-reachable address. It prefers IPs on the Vagrant
-// private network (192.168.x.x) over VirtualBox NAT (10.0.2.x) which is
-// only reachable from inside the VM. Also skips link-local and loopback.
-func pickRoutableIP(hostnameOutput string) string {
-	var candidates []net.IP
-	for _, addr := range strings.Fields(hostnameOutput) {
-		ip := net.ParseIP(strings.TrimSpace(addr))
-		if ip == nil {
-			continue
-		}
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsLoopback() {
-			continue
-		}
-		candidates = append(candidates, ip)
-	}
-
-	// Prefer IPs on common Vagrant private network ranges (192.168.x.x)
-	// over VirtualBox NAT addresses (10.0.2.x) which aren't host-reachable.
-	for _, ip := range candidates {
-		if v4 := ip.To4(); v4 != nil && v4[0] == 192 && v4[1] == 168 {
-			return ip.String()
-		}
-	}
-
-	if len(candidates) > 0 {
-		return candidates[0].String()
-	}
-	return ""
 }

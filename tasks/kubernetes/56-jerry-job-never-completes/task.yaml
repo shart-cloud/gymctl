@@ -122,16 +122,13 @@ spec:
     - Without Indexed mode, NonIndexed pods all run the same work and never
       know when the job as a whole is done (unless the app itself tracks this)
 
-  tasking:
-    ticket: "OPS-2301"
-    priority: "P1"
+  brief:
     summary: "Batch processing job running for 30 minutes with 0 completions"
     description: |
       Jerry set up a Job to process 6 data chunks using 3 parallel workers.
       The pods are healthy and running, but the Job shows 0/6 completions after
       30 minutes. The workers loop indefinitely because they can't determine
       which chunk is theirs or when to exit. Downstream pipeline is blocked.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "the pods are all running, i don't understand why completions shows 0"

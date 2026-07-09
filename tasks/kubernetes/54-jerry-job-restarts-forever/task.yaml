@@ -95,16 +95,13 @@ spec:
     other value. Never creates a new pod on failure. OnFailure restarts the
     same pod on failure. Either way, a successful exit (code 0) means done.
 
-  tasking:
-    ticket: "OPS-1901"
-    priority: "P2"
+  brief:
     summary: "Database seed job running 11 times and counting"
     description: |
       Jerry wrote a one-shot seed job for the new staging environment. The
       pod exits successfully every time but immediately restarts. The seed
       script is idempotent so no data corruption yet, but this is wrong and
       consuming cluster resources unnecessarily.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "i copied the container spec from my deployment, it should work the same way"

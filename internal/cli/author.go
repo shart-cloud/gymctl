@@ -48,7 +48,7 @@ func newAuthorCmd() *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(newAuthorHashAnswersCmd())
+	cmd.AddCommand(newAuthorHashAnswersCmd(), newAuthorStatusCmd())
 	return cmd
 }
 

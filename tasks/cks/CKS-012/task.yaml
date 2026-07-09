@@ -154,13 +154,6 @@ spec:
     - title: "Configure a Security Context for a Pod or Container"
       url: "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
 
-  tasking:
-    ticket: "CKS-012"
-    priority: "P1"
-    summary: "Pod Security Context Lockdown"
-    description: "backend-api runs as root with a writable rootfs and all caps. Apply a hardened securityContext without breaking it."
-    reporter: "GRIM-9"
-
   jerryDialog:
     onStart: "Jerry's backend-api runs as root with a writable disk and every capability. That's not a pod, it's a launch pad. Lock it down."
     onCheckFail: "Not locked down yet, or you locked it so hard it won't start. Both matter — it has to be hardened AND Running."

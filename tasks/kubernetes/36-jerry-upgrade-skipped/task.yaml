@@ -103,16 +103,13 @@ spec:
     `kubeadm upgrade plan` before `apply`, `kubectl drain` before touching worker
     packages, and `kubeadm upgrade node` on each worker to sync kubelet config.
 
-  tasking:
-    ticket: "OPS-1190"
-    priority: "P1"
+  brief:
     summary: "Cluster upgrade script has version skew violation — will fail at apply"
     description: |
       Jerry's upgrade script for the prod cluster jumps straight from v1.29 to v1.31.
       kubeadm will reject this. The script also has several other procedural gaps
       that would leave the cluster in a broken state mid-upgrade.
       Fix /tmp/jerry-upgrade.sh before the maintenance window tonight.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "1.29 to 1.31 is just two versions, that's basically nothing"

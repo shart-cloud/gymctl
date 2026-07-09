@@ -69,6 +69,15 @@ func builtIns() []Definition {
 		{ID: "7", Name: "Password Cracking", Weight: 12},
 	}
 
+	cksDomains := []Domain{
+		{ID: "cluster-setup", Name: "Cluster Setup", Weight: 15},
+		{ID: "cluster-hardening", Name: "Cluster Hardening", Weight: 15},
+		{ID: "system-hardening", Name: "System Hardening", Weight: 10},
+		{ID: "minimize-microservice-vulnerabilities", Name: "Minimize Microservice Vulnerabilities", Weight: 20},
+		{ID: "supply-chain-security", Name: "Supply Chain Security", Weight: 20},
+		{ID: "monitoring-logging-runtime-security", Name: "Monitoring, Logging & Runtime Security", Weight: 20},
+	}
+
 	return []Definition{
 		{
 			ID:              "cka",
@@ -90,6 +99,17 @@ func builtIns() []Definition {
 			TrackPrefix:     "gx-cs",
 			DefaultDuration: 240,
 			DefaultBackend:  "local",
+		},
+		{
+			ID:              "cks",
+			Name:            "CKS Exam Mode",
+			Domains:         cksDomains,
+			DomainWeights:   weightsByName(cksDomains),
+			DomainOrder:     namesInOrder(cksDomains),
+			AllowedTracks:   []string{"cks"},
+			TrackPrefix:     "cks",
+			DefaultDuration: 120,
+			DefaultBackend:  "vagrant",
 		},
 	}
 }

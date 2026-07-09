@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"gymctl/internal/environment"
 	"gymctl/internal/progress"
 	"gymctl/internal/scenario"
 )
@@ -19,6 +20,7 @@ type CleanupConfig struct {
 	CleanImages     bool   // Clean Docker images
 	CleanVolumes    bool   // Clean Docker volumes
 	CleanContainers bool   // Clean stopped containers
+	ReportEmpty     bool   // Report when no matching artifacts are found
 	Exercise        string // Exercise name for targeted cleanup
 }
 
@@ -37,6 +39,9 @@ func CleanupHook(cmd *cobra.Command, exercise *scenario.Exercise, config *Cleanu
 	}
 
 	if artifacts.IsEmpty() {
+		if config.ReportEmpty {
+			ColorDim.Fprintln(cmd.OutOrStdout(), "No gymctl-attributed Docker artifacts found for this exercise.")
+		}
 		return nil
 	}
 
@@ -140,11 +145,12 @@ func (a *DockerArtifacts) IsEmpty() bool {
 func detectDockerArtifacts(ctx context.Context, exercise *scenario.Exercise) (*DockerArtifacts, error) {
 	artifacts := &DockerArtifacts{}
 
-	// Label used to tag exercise resources
-	label := fmt.Sprintf("gym.exercise=%s", exercise.Metadata.Name)
+	managedLabel := environment.DockerManagedLabel + "=true"
+	exerciseLabel := environment.DockerExerciseLabel + "=" + exercise.Metadata.Name
+	composeProjectLabel := "com.docker.compose.project=" + environment.DockerComposeProjectName(exercise.Metadata.Name)
 
-	// Find images with the exercise label
-	cmd := exec.CommandContext(ctx, "docker", "images", "--filter", fmt.Sprintf("label=%s", label), "--format", "{{.ID}}:{{.Size}}")
+	// Find images that gymctl built directly for this exercise.
+	cmd := exec.CommandContext(ctx, "docker", "images", "--filter", "label="+managedLabel, "--filter", "label="+exerciseLabel, "--format", "{{.ID}}\t{{.Size}}")
 	output, err := cmd.Output()
 	if err == nil && len(output) > 0 {
 		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
@@ -152,63 +158,69 @@ func detectDockerArtifacts(ctx context.Context, exercise *scenario.Exercise) (*D
 			if line == "" {
 				continue
 			}
-			parts := strings.Split(line, ":")
+			parts := strings.SplitN(line, "\t", 2)
 			if len(parts) == 2 {
-				artifacts.Images = append(artifacts.Images, parts[0])
+				imageID := strings.TrimSpace(parts[0])
+				if imageID == "" || contains(artifacts.Images, imageID) {
+					continue
+				}
+				artifacts.Images = append(artifacts.Images, imageID)
 				artifacts.ImageCount++
-				// Parse size (Docker gives it in human format, we need to parse)
 				artifacts.ImageSize += parseDockerSize(parts[1])
 			}
 		}
 	}
 
-	// Also check for images built in the work directory
-	_, err = resolveWorkDir(exercise.Metadata.Name)
-	if err == nil {
-		// Look for Dockerfiles in work directory
-		cmd = exec.CommandContext(ctx, "docker", "images", "--format", "{{.Repository}}:{{.Tag}}:{{.ID}}:{{.Size}}")
+	containerFilters := [][]string{
+		{"label=" + managedLabel, "label=" + exerciseLabel},
+		{"label=" + composeProjectLabel},
+	}
+	for _, filters := range containerFilters {
+		args := []string{"ps", "-a", "--filter", "status=exited"}
+		for _, filter := range filters {
+			args = append(args, "--filter", filter)
+		}
+		args = append(args, "--format", "{{.ID}}")
+
+		cmd = exec.CommandContext(ctx, "docker", args...)
 		output, err = cmd.Output()
-		if err == nil {
+		if err == nil && len(output) > 0 {
 			lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 			for _, line := range lines {
-				if strings.Contains(line, exercise.Metadata.Name) {
-					parts := strings.Split(line, ":")
-					if len(parts) >= 4 && !contains(artifacts.Images, parts[2]) {
-						artifacts.Images = append(artifacts.Images, parts[2])
-						artifacts.ImageCount++
-						artifacts.ImageSize += parseDockerSize(parts[3])
-					}
+				containerID := strings.TrimSpace(line)
+				if containerID != "" && !contains(artifacts.Containers, containerID) {
+					artifacts.Containers = append(artifacts.Containers, containerID)
+					artifacts.ContainerCount++
 				}
 			}
 		}
 	}
 
-	// Find stopped containers
-	cmd = exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "status=exited", "--filter", fmt.Sprintf("label=%s", label), "--format", "{{.ID}}")
-	output, err = cmd.Output()
-	if err == nil && len(output) > 0 {
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, line := range lines {
-			if line != "" {
-				artifacts.Containers = append(artifacts.Containers, line)
-				artifacts.ContainerCount++
-			}
-		}
+	volumeFilters := [][]string{
+		{"label=" + managedLabel, "label=" + exerciseLabel},
+		{"label=" + composeProjectLabel},
 	}
+	for _, filters := range volumeFilters {
+		args := []string{"volume", "ls"}
+		for _, filter := range filters {
+			args = append(args, "--filter", filter)
+		}
+		args = append(args, "--format", "{{.Name}}")
 
-	// Find volumes
-	cmd = exec.CommandContext(ctx, "docker", "volume", "ls", "--filter", fmt.Sprintf("label=%s", label), "--format", "{{.Name}}")
-	output, err = cmd.Output()
-	if err == nil && len(output) > 0 {
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, line := range lines {
-			if line != "" {
-				artifacts.Volumes = append(artifacts.Volumes, line)
+		cmd = exec.CommandContext(ctx, "docker", args...)
+		output, err = cmd.Output()
+		if err == nil && len(output) > 0 {
+			lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+			for _, line := range lines {
+				volumeName := strings.TrimSpace(line)
+				if volumeName == "" || contains(artifacts.Volumes, volumeName) {
+					continue
+				}
+				artifacts.Volumes = append(artifacts.Volumes, volumeName)
 				artifacts.VolumeCount++
-				// Get volume size
-				sizeCmd := exec.CommandContext(ctx, "docker", "volume", "inspect", line, "--format", "{{.UsageData.Size}}")
+
+				sizeCmd := exec.CommandContext(ctx, "docker", "volume", "inspect", volumeName, "--format", "{{.UsageData.Size}}")
 				if sizeOutput, err := sizeCmd.Output(); err == nil {
-					// This returns size in bytes
 					var size int64
 					fmt.Sscanf(string(sizeOutput), "%d", &size)
 					artifacts.VolumeSize += size
@@ -233,10 +245,6 @@ func cleanDockerImages(ctx context.Context, exercise *scenario.Exercise) (int64,
 		cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageID)
 		cmd.Run() // Ignore errors for individual images
 	}
-
-	// Also try to clean dangling images
-	cmd := exec.CommandContext(ctx, "docker", "image", "prune", "-f")
-	cmd.Run()
 
 	return totalSize, nil
 }
@@ -357,6 +365,7 @@ This helps reclaim disk space after completing exercises.`,
 					CleanImages:     true,
 					CleanContainers: true,
 					CleanVolumes:    true,
+					ReportEmpty:     true,
 					Exercise:        exerciseName,
 				}
 
@@ -458,9 +467,9 @@ func interactiveCleanup(cmd *cobra.Command, ctx context.Context) error {
 	}
 
 	if !hasArtifacts {
-		ColorInfo.Fprintln(cmd.OutOrStdout(), "No Docker artifacts found from completed exercises.")
+		ColorInfo.Fprintln(cmd.OutOrStdout(), "No gymctl-attributed Docker artifacts found from completed exercises.")
 		fmt.Fprintln(cmd.OutOrStdout())
-		ColorDim.Fprintln(cmd.OutOrStdout(), "Tip: Use 'gymctl cleanup --all' for system-wide Docker cleanup")
+		ColorDim.Fprintln(cmd.OutOrStdout(), "Older unlabeled resources are ignored. Use 'gymctl cleanup --all' for explicit system-wide Docker cleanup.")
 		return nil
 	}
 

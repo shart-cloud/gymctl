@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -73,14 +74,14 @@ func newRecoverCmd() *cobra.Command {
 				spinner.Success("Progress file is valid")
 			}
 
-			// 2. Check for orphaned containers
+			// 2. Check for orphaned gymctl-managed containers
 			spinner.Start("Checking for orphaned containers")
 			orphaned, err := findOrphanedContainers(cmd.Context())
 			if err != nil {
 				spinner.Fail("Failed to check containers")
 			} else if len(orphaned) > 0 {
 				spinner.Stop()
-				ColorWarning.Fprintf(cmd.OutOrStdout(), "Found %d orphaned containers\n", len(orphaned))
+				ColorWarning.Fprintf(cmd.OutOrStdout(), "Found %d orphaned container(s)\n", len(orphaned))
 
 				for _, container := range orphaned {
 					ColorDim.Fprintf(cmd.OutOrStdout(), "  - %s\n", container)
@@ -105,18 +106,19 @@ func newRecoverCmd() *cobra.Command {
 			} else {
 				spinner.Success(fmt.Sprintf("Found %d work directories", len(workDirs)))
 
-				// Check for exercises without work dirs
-				for name, status := range progressFile.Exercises {
-					if status.Status == "in_progress" || status.Status == "completed" {
-						workDir, _ := resolveWorkDir(name)
-						if _, err := os.Stat(workDir); os.IsNotExist(err) {
-							ColorWarning.Fprintf(cmd.OutOrStdout(), "Missing work directory for %s\n", name)
+				if progressFile != nil {
+					for name, status := range progressFile.Exercises {
+						if status.Status == "in_progress" || status.Status == "completed" {
+							workDir, _ := resolveWorkDir(name)
+							if _, err := os.Stat(workDir); os.IsNotExist(err) {
+								ColorWarning.Fprintf(cmd.OutOrStdout(), "Missing work directory for %s\n", name)
 
-							if force || confirmAction(cmd, fmt.Sprintf("Create work directory for %s?", name)) {
-								if err := os.MkdirAll(workDir, 0755); err != nil {
-									ColorError.Fprintf(cmd.OutOrStdout(), "Failed to create: %v\n", err)
-								} else {
-									ColorSuccess.Fprintf(cmd.OutOrStdout(), "✓ Created work directory for %s\n", name)
+								if force || confirmAction(cmd, fmt.Sprintf("Create work directory for %s?", name)) {
+									if err := os.MkdirAll(workDir, 0o755); err != nil {
+										ColorError.Fprintf(cmd.OutOrStdout(), "Failed to create: %v\n", err)
+									} else {
+										ColorSuccess.Fprintf(cmd.OutOrStdout(), "✓ Created work directory for %s\n", name)
+									}
 								}
 							}
 						}
@@ -148,7 +150,7 @@ func newRecoverCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&backupPath, "backup", "b", "", "Path to backup file to restore")
+	cmd.Flags().StringVarP(&backupPath, "backup", "b", "", "Path to backup file to restore work directory contents from")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force recovery without confirmation")
 
 	return cmd
@@ -189,7 +191,7 @@ func recoverExercise(cmd *cobra.Command, exerciseName, backupPath string, force 
 	case "docker":
 		if exercise.Spec.Environment.Docker != nil {
 			workDir, _ := resolveWorkDir(exerciseName)
-			manager := environment.DockerManager{WorkDir: workDir}
+			manager := environment.DockerManager{WorkDir: workDir, ExerciseName: exerciseName}
 			_ = manager.Teardown(ctx, entry.Dir, *exercise.Spec.Environment.Docker)
 		}
 	case "kubernetes":
@@ -270,7 +272,7 @@ func createBackup(exerciseName string) (string, error) {
 	// Backup work directory
 	workDir, err := resolveWorkDir(exerciseName)
 	if err == nil {
-		filepath.Walk(workDir, func(path string, info os.FileInfo, err error) error {
+		if walkErr := filepath.Walk(workDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -288,23 +290,31 @@ func createBackup(exerciseName string) (string, error) {
 			}
 
 			if !info.IsDir() {
-				file, err := os.Open(path)
+				src, err := os.Open(path)
 				if err != nil {
 					return err
 				}
-				defer file.Close()
-				io.Copy(tw, file)
+				defer src.Close()
+				_, err = io.Copy(tw, src)
+				return err
 			}
 
 			return nil
-		})
+		}); walkErr != nil {
+			return "", fmt.Errorf("backup work directory: %w", walkErr)
+		}
 	}
 
 	// Backup progress entry
-	progressPath, _ := resolveProgressFile()
-	progressFile, _ := progress.Load(progressPath)
+	progressPath, err := resolveProgressFile()
+	if err != nil {
+		return backupFile, nil
+	}
+	progressFile, err := progress.Load(progressPath)
+	if err != nil {
+		return backupFile, nil
+	}
 	if status, exists := progressFile.Exercises[exerciseName]; exists {
-		// Create a metadata file with progress info
 		metadata := fmt.Sprintf("exercise: %s\nstatus: %s\nstarted: %s\ncompleted: %s\nhints: %d\n",
 			exerciseName, status.Status, status.StartedAt, status.CompletedAt, status.HintsUsed)
 
@@ -313,8 +323,12 @@ func createBackup(exerciseName string) (string, error) {
 			Mode: 0644,
 			Size: int64(len(metadata)),
 		}
-		tw.WriteHeader(header)
-		tw.Write([]byte(metadata))
+		if err := tw.WriteHeader(header); err != nil {
+			return "", fmt.Errorf("write metadata header: %w", err)
+		}
+		if _, err := tw.Write([]byte(metadata)); err != nil {
+			return "", fmt.Errorf("write metadata: %w", err)
+		}
 	}
 
 	return backupFile, nil
@@ -371,13 +385,105 @@ func restoreFromBackup(cmd *cobra.Command, exerciseName, backupPath string) erro
 }
 
 func findOrphanedContainers(ctx context.Context) ([]string, error) {
-	// Implementation would check for containers with gymctl labels
-	// that don't match current exercises
-	return []string{}, nil
+	entries, err := loadCatalogEntries()
+	if err != nil {
+		return nil, err
+	}
+
+	knownExercises := make(map[string]bool, len(entries))
+	knownComposeProjects := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		exerciseName := entry.Exercise.Metadata.Name
+		knownExercises[exerciseName] = true
+		knownComposeProjects[environment.DockerComposeProjectName(exerciseName)] = true
+	}
+
+	orphaned := []string{}
+	seen := map[string]bool{}
+	addOrphan := func(containerID string) {
+		containerID = strings.TrimSpace(containerID)
+		if containerID == "" || seen[containerID] {
+			return
+		}
+		seen[containerID] = true
+		orphaned = append(orphaned, containerID)
+	}
+
+	format := fmt.Sprintf("{{.ID}}\t{{.Label %q}}\t{{.Names}}", environment.DockerExerciseLabel)
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "label="+environment.DockerManagedLabel+"=true", "--format", format)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 2 {
+			continue
+		}
+
+		containerID := strings.TrimSpace(parts[0])
+		exerciseName := strings.TrimSpace(parts[1])
+		if containerID == "" {
+			continue
+		}
+		if exerciseName == "" || !knownExercises[exerciseName] {
+			addOrphan(containerID)
+		}
+	}
+
+	format = fmt.Sprintf("{{.ID}}\t{{.Label %q}}\t{{.Names}}", "com.docker.compose.project")
+	cmd = exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "label=com.docker.compose.project", "--format", format)
+	output, err = cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 2 {
+			continue
+		}
+
+		containerID := strings.TrimSpace(parts[0])
+		projectName := strings.TrimSpace(parts[1])
+		if projectName == environment.DockerLegacyComposeProjectName {
+			addOrphan(containerID)
+			continue
+		}
+		if strings.HasPrefix(projectName, "gymctl-") && !knownComposeProjects[projectName] {
+			addOrphan(containerID)
+		}
+	}
+
+	return orphaned, nil
 }
 
 func cleanupOrphanedContainers(ctx context.Context, containers []string) error {
-	// Implementation would remove the specified containers
+	var failures []string
+	for _, container := range containers {
+		container = strings.TrimSpace(container)
+		if container == "" {
+			continue
+		}
+		cmd := exec.CommandContext(ctx, "docker", "rm", "-f", container)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			msg := strings.TrimSpace(string(output))
+			if msg == "" {
+				msg = err.Error()
+			}
+			failures = append(failures, fmt.Sprintf("%s: %s", container, msg))
+		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%s", strings.Join(failures, "; "))
+	}
 	return nil
 }
 

@@ -97,9 +97,7 @@ spec:
       Recreate  → evict when drift is large
       Auto      → Recreate + Initial combined
 
-  tasking:
-    ticket: "OPS-3512"
-    priority: "P0"
+  brief:
     summary: "Production service going down every few minutes, VPA is evicting the only pod"
     description: |
       Single-replica production service is experiencing 30-60 second outages
@@ -108,7 +106,6 @@ spec:
       to serve traffic during the eviction.
 
       Fix VPA without removing it — we still want recommendations.
-    reporter: "GRIM-9"
 
   jerryDialog:
     onStart: "auto mode means it handles everything automatically, which is what we want"

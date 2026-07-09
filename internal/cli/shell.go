@@ -16,11 +16,12 @@ import (
 
 func newShellCmd() *cobra.Command {
 	var useWorkstation bool
+	var includeScaffold bool
 
 	cmd := &cobra.Command{
 		Use:   "shell",
-		Short: "Open the interactive GRIM sprint browser or exec into workstation",
-		Long: `Open the interactive GRIM sprint browser to navigate exercises,
+		Short: "Open the interactive exercise browser or exec into workstation",
+		Long: `Open the interactive exercise browser to navigate exercises,
 or directly exec into the workstation container if --workstation is used.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if useWorkstation {
@@ -31,6 +32,7 @@ or directly exec into the workstation container if --workstation is used.`,
 			if err != nil {
 				return fmt.Errorf("load catalog: %w", err)
 			}
+			catalog = filterScaffoldEntries(catalog, includeScaffold)
 
 			progressPath, err := resolveProgressFile()
 			if err != nil {
@@ -50,6 +52,7 @@ or directly exec into the workstation container if --workstation is used.`,
 	}
 
 	cmd.Flags().BoolVar(&useWorkstation, "workstation", false, "Exec directly into workstation container")
+	cmd.Flags().BoolVar(&includeScaffold, "include-scaffold", false, "Include scaffolded exercises in the browser")
 
 	return cmd
 }

@@ -51,13 +51,6 @@ func (sm *SpinnerManager) Start(message string) {
 	sm.spinner.Start()
 }
 
-func (sm *SpinnerManager) Update(message string) {
-	if sm.spinner != nil {
-		sm.spinner.Suffix = " " + message
-	}
-	sm.message = message
-}
-
 func (sm *SpinnerManager) Success(message string) {
 	if sm.spinner != nil {
 		sm.spinner.Stop()

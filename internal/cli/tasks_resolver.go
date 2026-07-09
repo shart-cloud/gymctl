@@ -20,24 +20,27 @@ import (
 func resolveTasksDirectories() ([]string, error) {
 	// 1. Check if explicitly set
 	if dirs := parseTasksDirList(tasksDir); len(dirs) > 0 && tasksDir != "tasks" {
-		if err := validateTasksDirectories(dirs); err != nil {
+		resolved, err := resolveProvidedTasksDirectories(dirs)
+		if err != nil {
 			return nil, err
 		}
-		return dirs, nil
+		return resolved, nil
 	}
 
 	// 2. Check environment variable
 	if dirs := parseTasksDirList(os.Getenv("GYMCTL_TASKS_DIRS")); len(dirs) > 0 {
-		if err := validateTasksDirectories(dirs); err != nil {
+		resolved, err := resolveProvidedTasksDirectories(dirs)
+		if err != nil {
 			return nil, err
 		}
-		return dirs, nil
+		return resolved, nil
 	}
 	if dir := strings.TrimSpace(os.Getenv("GYMCTL_TASKS_DIR")); dir != "" {
-		if err := validateTasksDirectories([]string{dir}); err != nil {
+		resolved, err := resolveProvidedTasksDirectories([]string{dir})
+		if err != nil {
 			return nil, err
 		}
-		return []string{dir}, nil
+		return resolved, nil
 	}
 
 	// 3. Check local directory (development mode)
@@ -96,17 +99,43 @@ func parseTasksDirList(raw string) []string {
 	return dirs
 }
 
-func validateTasksDirectories(dirs []string) error {
+func resolveProvidedTasksDirectories(dirs []string) ([]string, error) {
+	resolved := make([]string, 0, len(dirs))
+	seen := map[string]bool{}
 	for _, dir := range dirs {
-		info, err := os.Stat(dir)
+		candidate, err := resolveTasksDirectoryCandidate(dir)
 		if err != nil {
-			return fmt.Errorf("specified tasks directory not found: %s", dir)
+			return nil, err
 		}
-		if !info.IsDir() {
-			return fmt.Errorf("tasks path is not a directory: %s", dir)
+		candidate = filepath.Clean(candidate)
+		if seen[candidate] {
+			continue
 		}
+		seen[candidate] = true
+		resolved = append(resolved, candidate)
 	}
-	return nil
+	return resolved, nil
+}
+
+func resolveTasksDirectoryCandidate(dir string) (string, error) {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", fmt.Errorf("specified tasks directory not found: %s", dir)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("tasks path is not a directory: %s", dir)
+	}
+
+	tasksSubdir := filepath.Join(dir, "tasks")
+	tasksInfo, err := os.Stat(tasksSubdir)
+	if err == nil && tasksInfo.IsDir() {
+		return tasksSubdir, nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat tasks subdirectory: %w", err)
+	}
+
+	return dir, nil
 }
 
 func loadCatalogEntries() ([]scenario.CatalogEntry, error) {

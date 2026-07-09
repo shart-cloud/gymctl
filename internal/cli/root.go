@@ -61,6 +61,7 @@ func init() {
 		newCheckCmd(),
 		newHintCmd(),
 		newResetCmd(),
+		newBackupCmd(),
 		newRecoverCmd(),
 		newStatusCmd(),
 		newCleanCmd(),
