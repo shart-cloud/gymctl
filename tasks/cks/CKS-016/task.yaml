@@ -9,52 +9,102 @@ metadata:
   order: 16
 
 spec:
-  difficulty: beginner
+  difficulty: intermediate
   estimatedTime: 25m
   points: 100
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Label `restricted-apps` to enforce restricted, label `baseline-apps` to enforce baseline and warn restricted, verify a root pod is rejected in restricted, warn-only behavior in baseline, and a compliant restricted pod runs.
+    Two namespaces run workloads with no Pod Security Admission (PSA) controls,
+    so anyone can schedule a root or privileged pod. Enforce the built-in Pod
+    Security Standards with namespace labels.
+
+      - `restricted-apps`: **enforce** the `restricted` standard.
+      - `baseline-apps`: **enforce** the `baseline` standard, and additionally
+        **warn** on `restricted` violations.
+
+    Result: a non-compliant (root, no securityContext) pod is *rejected* in
+    `restricted-apps` but *admitted* in `baseline-apps`; a fully compliant pod
+    is admitted in `restricted-apps`.
+
+    PSA is configured entirely through `pod-security.kubernetes.io/*` labels on
+    the namespace — no admission webhooks to install.
 
   learningOutcomes:
-    - "Practice CKS domain: Minimize Microservice Vulnerabilities"
-    - "Apply concepts: Pod Security Standards, Pod Security Admission, enforce/warn/audit labels"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Minimize Microservice Vulnerabilities — Pod Security Standards"
+    - "Enforce restricted/baseline via namespace labels"
+    - "Combine enforce with warn/audit modes"
+    - "Predict which pods PSA admits or rejects"
 
   tags:
     - "cks"
-    - "cks-minimize-microservice-vulnerabilities"
+    - "cks-microservice-vulnerabilities"
     - "tier-1"
     - "kind"
-    - "pod-security-standards"
     - "pod-security-admission"
-    - "enforce-warn-audit-labels"
-
+    - "pod-security-standards"
 
   environment:
     type: kubernetes
     kubernetes:
       provider: kind
       createCluster: true
-      namespace: default
+      namespace: restricted-apps
+    customSetup:
+      - type: script
+        timeout: 120s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/namespaces.yaml
 
   checks:
-    - name: "Executable lab checks implemented"
+    - name: "restricted-apps enforces the restricted standard"
       type: script
       script: |
-        echo "CKS-016 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - restricted-apps enforces restricted
-        - baseline-apps enforces baseline and warns restricted
-        - Root pod rejected in restricted-apps
-        - Root pod admitted with warning in baseline-apps
-        - Compliant pod runs in restricted-apps
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -euo pipefail
+        v=$(kubectl get ns restricted-apps -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')
+        [ "$v" = "restricted" ] || { echo "enforce=$v (want restricted)"; exit 1; }
+
+    - name: "baseline-apps enforces the baseline standard"
+      type: script
+      script: |
+        set -euo pipefail
+        v=$(kubectl get ns baseline-apps -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')
+        [ "$v" = "baseline" ] || { echo "enforce=$v (want baseline)"; exit 1; }
+
+    - name: "baseline-apps warns on restricted violations"
+      type: script
+      script: |
+        set -euo pipefail
+        v=$(kubectl get ns baseline-apps -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/warn}')
+        [ "$v" = "restricted" ] || { echo "warn=$v (want restricted)"; exit 1; }
+
+    - name: "a root pod is REJECTED in restricted-apps"
+      type: script
+      script: |
+        set -uo pipefail
+        root='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"psa-probe-root"},"spec":{"containers":[{"name":"c","image":"busybox:1.36","command":["sh","-c","sleep 1"]}]}}'
+        if printf '%s' "$root" | kubectl -n restricted-apps apply --dry-run=server -f - >/tmp/psa-out 2>&1; then
+          echo "root pod was admitted in restricted-apps — enforcement missing"; cat /tmp/psa-out; exit 1
+        fi
+        grep -qiE "violate.*PodSecurity|forbidden" /tmp/psa-out || { echo "rejected for the wrong reason:"; cat /tmp/psa-out; exit 1; }
+        echo "root pod correctly rejected"
+
+    - name: "a root pod is ADMITTED in baseline-apps"
+      type: script
+      script: |
+        set -euo pipefail
+        root='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"psa-probe-root"},"spec":{"containers":[{"name":"c","image":"busybox:1.36","command":["sh","-c","sleep 1"]}]}}'
+        printf '%s' "$root" | kubectl -n baseline-apps apply --dry-run=server -f - >/dev/null
+        echo "root pod admitted under baseline (as expected)"
+
+    - name: "a compliant pod is ADMITTED in restricted-apps"
+      type: script
+      script: |
+        set -euo pipefail
+        ok='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"psa-probe-compliant"},"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"c","image":"busybox:1.36","command":["sh","-c","sleep 1"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+        printf '%s' "$ok" | kubectl -n restricted-apps apply --dry-run=server -f - >/dev/null
+        echo "compliant pod admitted under restricted (as expected)"
 
   hints:
     - cost: 0
@@ -65,16 +115,28 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-016 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-016 complete. restricted-apps now rejects anything that isn't a
+    hardened pod, while baseline-apps blocks the truly dangerous stuff and warns
+    on the rest.
+
+    **Key takeaway:** Pod Security Admission is built in — no webhook needed.
+    `enforce` blocks, `warn`/`audit` inform. Roll out with warn/audit first, then
+    flip to enforce once workloads are clean.
+
+  references:
+    - title: "Pod Security Standards"
+      url: "https://kubernetes.io/docs/concepts/security/pod-security-standards/"
+    - title: "Enforce Pod Security Standards with Namespace Labels"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/enforce-standards-namespace-labels/"
 
   tasking:
     ticket: "CKS-016"
     priority: "P1"
     summary: "Pod Security Admission"
-    description: "Scaffolded CKS exercise for Minimize Microservice Vulnerabilities using kind infrastructure."
+    description: "Two namespaces have no PSA. Enforce restricted and baseline standards via namespace labels."
     reporter: "GRIM-9"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Nothing stops Jerry from scheduling a root pod anywhere. Turn on Pod Security Admission and set the bar per namespace."
+    onCheckFail: "The labels aren't taking effect the way you expect. Test with a known-bad and a known-good pod using --dry-run=server."
+    onComplete: "Admission control is live. Root pods bounce off restricted-apps before they ever schedule."

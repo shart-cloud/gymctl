@@ -1,0 +1,24 @@
+# Broken state: no securityContext at all. Runs as root, writable rootfs,
+# all default capabilities.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-api
+  namespace: app
+  labels: { app: backend-api }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: backend-api } }
+  template:
+    metadata:
+      labels: { app: backend-api }
+    spec:
+      containers:
+        - name: api
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 36000"]

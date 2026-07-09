@@ -1,0 +1,60 @@
+# Broken state: three workloads, all on the default SA, all mounting a token
+# they don't need (automount defaults to on).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+  namespace: production
+  labels: { app: web-app }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: web-app } }
+  template:
+    metadata:
+      labels: { app: web-app }
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 36000"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: production
+  labels: { app: worker }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: worker } }
+  template:
+    metadata:
+      labels: { app: worker }
+    spec:
+      containers:
+        - name: worker
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 36000"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+  namespace: production
+  labels: { app: api-server }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: api-server } }
+  template:
+    metadata:
+      labels: { app: api-server }
+    spec:
+      containers:
+        - name: api
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 36000"]

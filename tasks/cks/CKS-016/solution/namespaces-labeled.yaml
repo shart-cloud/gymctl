@@ -1,0 +1,19 @@
+# PSA is pure namespace labels — applying these over the existing namespaces
+# turns enforcement on.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: restricted-apps
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: baseline-apps
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

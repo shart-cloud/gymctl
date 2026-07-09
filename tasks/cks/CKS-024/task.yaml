@@ -9,52 +9,107 @@ metadata:
   order: 24
 
 spec:
-  difficulty: beginner
+  difficulty: intermediate
   estimatedTime: 25m
   points: 100
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Harden `production` Deployments `web`, `api`, and `cache` with read-only root filesystems, emptyDir mounts for app write paths, and no privilege escalation. Verify pods run and only designated write paths are writable.
+    Three deployments in `production` — `web`, `api`, and `cache` — run with
+    writable root filesystems. An attacker who lands in any of them can drop a
+    binary, patch a config, or persist. Make the containers immutable.
+
+    For all three deployments:
+
+      - Set `readOnlyRootFilesystem: true` on the container.
+      - Set `allowPrivilegeEscalation: false` on the container.
+      - Mount an `emptyDir` at `/tmp` so the app keeps a writable scratch path
+        under the now read-only root.
+
+    Every deployment must stay Available: writes to the image (e.g. `/etc`,
+    `/usr`) must fail, but writes to `/tmp` must succeed.
 
   learningOutcomes:
-    - "Practice CKS domain: Monitoring, Logging & Runtime Security"
-    - "Apply concepts: readOnlyRootFilesystem, emptyDir write paths, immutable containers"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Minimize Microservice Vulnerabilities — immutability"
+    - "Make container root filesystems read-only at scale"
+    - "Supply writable scratch space with emptyDir"
+    - "Disable privilege escalation across a fleet of deployments"
 
   tags:
     - "cks"
-    - "cks-monitoring-logging-runtime-security"
+    - "cks-microservice-vulnerabilities"
     - "tier-1"
     - "kind"
-    - "readonlyrootfilesystem"
-    - "emptydir-write-paths"
+    - "readonly-rootfs"
     - "immutable-containers"
-
 
   environment:
     type: kubernetes
     kubernetes:
       provider: kind
       createCluster: true
-      namespace: default
+      namespace: production
+    customSetup:
+      - type: script
+        timeout: 150s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/workloads.yaml
+          kubectl -n production rollout status deploy/web   --timeout=120s
+          kubectl -n production rollout status deploy/api   --timeout=120s
+          kubectl -n production rollout status deploy/cache --timeout=120s
 
   checks:
-    - name: "Executable lab checks implemented"
+    - name: "all three deployments set readOnlyRootFilesystem=true"
       type: script
       script: |
-        echo "CKS-024 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - All three deployments have readOnlyRootFilesystem=true
-        - Each has emptyDir volumes for write paths
-        - allowPrivilegeEscalation=false
-        - All pods Running
-        - Writes to /etc or /usr fail and designated dirs succeed
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -euo pipefail
+        for d in web api cache; do
+          v=$(kubectl -n production get deploy "$d" -o jsonpath='{.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem}')
+          [ "$v" = "true" ] || { echo "$d readOnlyRootFilesystem=$v (want true)"; exit 1; }
+        done
+        echo "web, api, cache all read-only"
+
+    - name: "all three deployments disable privilege escalation"
+      type: script
+      script: |
+        set -euo pipefail
+        for d in web api cache; do
+          v=$(kubectl -n production get deploy "$d" -o jsonpath='{.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation}')
+          [ "$v" = "false" ] || { echo "$d allowPrivilegeEscalation=$v (want false)"; exit 1; }
+        done
+        echo "web, api, cache all block privilege escalation"
+
+    - name: "all three deployments mount an emptyDir volume"
+      type: script
+      script: |
+        set -euo pipefail
+        for d in web api cache; do
+          v=$(kubectl -n production get deploy "$d" -o jsonpath='{.spec.template.spec.volumes[*].emptyDir}')
+          [ -n "$v" ] || { echo "$d has no emptyDir volume"; exit 1; }
+        done
+        echo "web, api, cache all have an emptyDir"
+
+    - name: "all three deployments are Available"
+      type: script
+      script: |
+        set -euo pipefail
+        for d in web api cache; do
+          kubectl -n production rollout status deploy/"$d" --timeout=90s >/dev/null
+        done
+        echo "web, api, cache all Available"
+
+    - name: "root filesystem is truly read-only, scratch dir writable"
+      type: script
+      script: |
+        set -uo pipefail
+        for d in web api cache; do
+          kubectl -n production exec deploy/"$d" -- sh -c 'echo ok > /tmp/probe' || { echo "$d cannot write /tmp"; exit 1; }
+          if kubectl -n production exec deploy/"$d" -- sh -c 'echo x > /etc/probe' 2>/dev/null; then
+            echo "$d wrote to /etc — root filesystem is NOT read-only"; exit 1
+          fi
+        done
+        echo "web, api, cache: image read-only, /tmp writable"
 
   hints:
     - cost: 0
@@ -65,16 +120,26 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-024 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-024 complete. web, api, and cache now run on immutable root filesystems
+    with privilege escalation disabled, and still serve because /tmp is a
+    writable emptyDir.
+
+    **Key takeaway:** `readOnlyRootFilesystem: true` is one of the highest-value,
+    lowest-cost container hardening settings. The only work is finding the paths
+    the app writes to and backing them with emptyDir volumes.
+
+  references:
+    - title: "Configure a Security Context for a Pod or Container"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
 
   tasking:
     ticket: "CKS-024"
     priority: "P1"
     summary: "Immutable Container Enforcement"
-    description: "Scaffolded CKS exercise for Monitoring, Logging & Runtime Security using kind infrastructure."
+    description: "web, api, cache run with writable root filesystems. Make them immutable with read-only roots + emptyDir scratch, no privilege escalation."
     reporter: "GRIM-9"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry's production containers all have writable disks. An attacker can rewrite them from the inside. Make them immutable."
+    onCheckFail: "Not immutable yet, or you made one so immutable it can't start. All three have to be read-only AND Available."
+    onComplete: "All three are immutable now. Nothing an attacker drops inside survives a restart, and they can't patch the image at runtime."

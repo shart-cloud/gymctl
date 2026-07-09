@@ -9,52 +9,109 @@ metadata:
   order: 6
 
 spec:
-  difficulty: beginner
+  difficulty: intermediate
   estimatedTime: 25m
   points: 100
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Harden ServiceAccount token exposure in `production`: disable automount on the default SA, disable tokens for `web-app` and `worker`, create `api-sa` with minimal Secret/ConfigMap read access, and assign it to `api-server`.
+    Every workload in `production` mounts a ServiceAccount token it never uses.
+    If any of these pods is compromised, the attacker gets a Kubernetes API
+    credential for free. Only `api-server` actually calls the API.
+
+    Harden token exposure:
+
+      1. Set `automountServiceAccountToken: false` on the `default`
+         ServiceAccount in `production`.
+      2. Stop `web-app` and `worker` from mounting a token
+         (`automountServiceAccountToken: false` on their pod specs).
+      3. Create ServiceAccount `api-sa` with a Role granting only `get`/`list`
+         on `secrets` and `configmaps`, bound with a RoleBinding.
+      4. Make the `api-server` deployment use `api-sa` (and keep its token).
+
+    Afterward: `web-app` and `worker` pods must have **no** token file, and
+    `api-server` pods must **have** one and run as `api-sa`.
 
   learningOutcomes:
-    - "Practice CKS domain: Cluster Hardening"
-    - "Apply concepts: automountServiceAccountToken, default service account, bound service account tokens"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: System Hardening — minimize ServiceAccount exposure"
+    - "Disable token automount at the ServiceAccount and pod level"
+    - "Grant a workload its own least-privilege ServiceAccount"
+    - "Confirm token presence/absence from inside the pod"
 
   tags:
     - "cks"
-    - "cks-cluster-hardening"
+    - "cks-system-hardening"
     - "tier-1"
     - "kind"
-    - "automountserviceaccounttoken"
-    - "default-service-account"
-    - "bound-service-account-tokens"
-
+    - "serviceaccount"
+    - "token-automount"
 
   environment:
     type: kubernetes
     kubernetes:
       provider: kind
       createCluster: true
-      namespace: default
+      namespace: production
+    customSetup:
+      - type: script
+        timeout: 150s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/workloads.yaml
+          kubectl -n production rollout status deploy/web-app    --timeout=120s
+          kubectl -n production rollout status deploy/worker     --timeout=120s
+          kubectl -n production rollout status deploy/api-server --timeout=120s
 
   checks:
-    - name: "Executable lab checks implemented"
+    - name: "default ServiceAccount disables token automount"
+      type: jsonpath
+      namespace: production
+      resource: serviceaccount/default
+      jsonpath: "{.automountServiceAccountToken}"
+      operator: equals
+      value: false
+
+    - name: "api-sa ServiceAccount exists"
+      type: resourceExists
+      namespace: production
+      resource: serviceaccount/api-sa
+
+    - name: "api-sa Role exists"
+      type: resourceExists
+      namespace: production
+      resource: role/api-sa
+
+    - name: "api-server deployment uses api-sa"
+      type: jsonpath
+      namespace: production
+      resource: deployment/api-server
+      jsonpath: "{.spec.template.spec.serviceAccountName}"
+      operator: equals
+      value: api-sa
+
+    - name: "web-app pod has NO ServiceAccount token mounted"
       type: script
       script: |
-        echo "CKS-006 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - default SA automountServiceAccountToken=false
-        - web-app and worker disable token automount
-        - api-sa exists with minimal Role/RoleBinding
-        - api-server uses api-sa
-        - Token file absent in web-app/worker and present in api-server
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -euo pipefail
+        kubectl -n production exec deploy/web-app -- \
+          sh -c '! test -e /var/run/secrets/kubernetes.io/serviceaccount/token'
+        echo "web-app has no token (good)"
+
+    - name: "worker pod has NO ServiceAccount token mounted"
+      type: script
+      script: |
+        set -euo pipefail
+        kubectl -n production exec deploy/worker -- \
+          sh -c '! test -e /var/run/secrets/kubernetes.io/serviceaccount/token'
+        echo "worker has no token (good)"
+
+    - name: "api-server pod HAS a ServiceAccount token mounted"
+      type: script
+      script: |
+        set -euo pipefail
+        kubectl -n production exec deploy/api-server -- \
+          sh -c 'test -s /var/run/secrets/kubernetes.io/serviceaccount/token'
+        echo "api-server has its token (good)"
 
   hints:
     - cost: 0
@@ -65,16 +122,26 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-006 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-006 complete. Only the workload that needs the API keeps a token, and it
+    runs as a least-privilege ServiceAccount. web-app and worker no longer ship
+    a free API credential to whoever compromises them.
+
+    **Key takeaway:** token automount defaults to on. Disable it on the default
+    SA and on pods that don't call the API, and give the ones that do their own
+    scoped ServiceAccount.
+
+  references:
+    - title: "Configure Service Accounts for Pods"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/"
 
   tasking:
     ticket: "CKS-006"
     priority: "P1"
     summary: "Service Account Hardening"
-    description: "Scaffolded CKS exercise for Cluster Hardening using kind infrastructure."
+    description: "Workloads in production mount unused SA tokens. Disable automount except where needed and scope the one that is."
     reporter: "GRIM-9"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Every pod in production is carrying an API token it never uses. That's a free credential for any attacker who lands one shell. Take them away."
+    onCheckFail: "Some pod still has a token it shouldn't, or the one that needs it lost it. Check each pod's mount."
+    onComplete: "Token exposure minimized. Compromising web-app no longer hands over a cluster credential."

@@ -9,54 +9,129 @@ metadata:
   order: 12
 
 spec:
-  difficulty: beginner
+  difficulty: intermediate
   estimatedTime: 25m
   points: 100
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Lock down `app/backend-api`: run as UID/GID 1000, read-only root filesystem, drop all capabilities then add NET_BIND_SERVICE, disallow privilege escalation, and mount emptyDir at `/tmp`.
+    The `backend-api` deployment in the `app` namespace runs as root with a
+    writable root filesystem and every default Linux capability. That's a
+    textbook container-escape starting point.
+
+    Lock the pod down without breaking it. The deployment must end up with:
+
+      - Pod-level `securityContext`: `runAsUser: 1000`, `runAsGroup: 1000`,
+        `runAsNonRoot: true`.
+      - Container `securityContext`: `readOnlyRootFilesystem: true`,
+        `allowPrivilegeEscalation: false`, and capabilities `drop: ["ALL"]`
+        then `add: ["NET_BIND_SERVICE"]`.
+      - An `emptyDir` volume mounted at `/tmp` so the app still has scratch space
+        under the read-only root.
+
+    The pod must stay Running: process runs as UID 1000, `/tmp` is writable.
 
   learningOutcomes:
-    - "Practice CKS domain: Minimize Microservice Vulnerabilities"
-    - "Apply concepts: runAsNonRoot, readOnlyRootFilesystem, capabilities, allowPrivilegeEscalation"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Minimize Microservice Vulnerabilities — securityContext"
+    - "Run containers as non-root with a read-only root filesystem"
+    - "Drop all capabilities and add back only what's required"
+    - "Provide writable scratch space with an emptyDir under a read-only root"
 
   tags:
     - "cks"
-    - "cks-minimize-microservice-vulnerabilities"
+    - "cks-microservice-vulnerabilities"
     - "tier-1"
     - "kind"
-    - "runasnonroot"
-    - "readonlyrootfilesystem"
+    - "securitycontext"
+    - "readonly-rootfs"
     - "capabilities"
-    - "allowprivilegeescalation"
-
 
   environment:
     type: kubernetes
     kubernetes:
       provider: kind
       createCluster: true
-      namespace: default
+      namespace: app
+    customSetup:
+      - type: script
+        timeout: 150s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/workload.yaml
+          kubectl -n app rollout status deploy/backend-api --timeout=120s
 
   checks:
-    - name: "Executable lab checks implemented"
+    - name: "Pod runs as UID 1000"
+      type: jsonpath
+      namespace: app
+      resource: deployment/backend-api
+      jsonpath: "{.spec.template.spec.securityContext.runAsUser}"
+      operator: equals
+      value: 1000
+
+    - name: "Pod runs as GID 1000"
+      type: jsonpath
+      namespace: app
+      resource: deployment/backend-api
+      jsonpath: "{.spec.template.spec.securityContext.runAsGroup}"
+      operator: equals
+      value: 1000
+
+    - name: "Pod is runAsNonRoot"
+      type: jsonpath
+      namespace: app
+      resource: deployment/backend-api
+      jsonpath: "{.spec.template.spec.securityContext.runAsNonRoot}"
+      operator: equals
+      value: true
+
+    - name: "Container root filesystem is read-only"
+      type: jsonpath
+      namespace: app
+      resource: deployment/backend-api
+      jsonpath: "{.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem}"
+      operator: equals
+      value: true
+
+    - name: "Privilege escalation is disabled"
+      type: jsonpath
+      namespace: app
+      resource: deployment/backend-api
+      jsonpath: "{.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation}"
+      operator: equals
+      value: false
+
+    - name: "Capabilities drop ALL"
+      type: jsonpath
+      namespace: app
+      resource: deployment/backend-api
+      jsonpath: "{.spec.template.spec.containers[0].securityContext.capabilities.drop}"
+      operator: contains
+      value: ALL
+
+    - name: "Capabilities add NET_BIND_SERVICE"
+      type: jsonpath
+      namespace: app
+      resource: deployment/backend-api
+      jsonpath: "{.spec.template.spec.containers[0].securityContext.capabilities.add}"
+      operator: contains
+      value: NET_BIND_SERVICE
+
+    - name: "Deployment is Available"
+      type: condition
+      namespace: app
+      resource: deployment/backend-api
+      condition: Available
+      status: "True"
+
+    - name: "Process really runs as 1000 and /tmp is writable"
       type: script
       script: |
-        echo "CKS-012 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - Pod securityContext uses UID/GID 1000 and runAsNonRoot
-        - Container readOnlyRootFilesystem=true
-        - Capabilities drop ALL and add NET_BIND_SERVICE
-        - allowPrivilegeEscalation=false
-        - emptyDir mounted at /tmp
-        - Pod Running; /etc write fails and /tmp write succeeds
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -euo pipefail
+        uid=$(kubectl -n app exec deploy/backend-api -- id -u)
+        [ "$uid" = "1000" ] || { echo "expected uid 1000, got $uid"; exit 1; }
+        kubectl -n app exec deploy/backend-api -- sh -c 'echo ok > /tmp/probe && cat /tmp/probe' | grep -q ok
+        echo "runs as 1000, /tmp writable"
 
   hints:
     - cost: 0
@@ -67,16 +142,26 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-012 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-012 complete. backend-api now runs as a non-root user with a read-only
+    root filesystem, no privilege escalation, and a single added capability —
+    and it still runs, because /tmp is a writable emptyDir.
+
+    **Key takeaway:** the strong container baseline is non-root + read-only root
+    + drop ALL caps + no privilege escalation. Add back only what the app needs
+    (a capability, a writable emptyDir), nothing more.
+
+  references:
+    - title: "Configure a Security Context for a Pod or Container"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
 
   tasking:
     ticket: "CKS-012"
     priority: "P1"
     summary: "Pod Security Context Lockdown"
-    description: "Scaffolded CKS exercise for Minimize Microservice Vulnerabilities using kind infrastructure."
+    description: "backend-api runs as root with a writable rootfs and all caps. Apply a hardened securityContext without breaking it."
     reporter: "GRIM-9"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry's backend-api runs as root with a writable disk and every capability. That's not a pod, it's a launch pad. Lock it down."
+    onCheckFail: "Not locked down yet, or you locked it so hard it won't start. Both matter — it has to be hardened AND Running."
+    onComplete: "Hardened and still healthy. An attacker landing in this container now has almost nothing to work with."

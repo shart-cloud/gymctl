@@ -1,0 +1,10 @@
+# Broken state: two namespaces, no Pod Security Admission labels. Anything goes.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: restricted-apps
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: baseline-apps

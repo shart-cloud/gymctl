@@ -9,54 +9,109 @@ metadata:
   order: 5
 
 spec:
-  difficulty: beginner
+  difficulty: intermediate
   estimatedTime: 25m
   points: 100
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    In `dev-team`, replace `ci-bot` cluster-admin access with namespace-scoped permissions for deployments, services, and configmaps, plus read-only cluster access to namespaces and nodes. Verify with `kubectl auth can-i`.
+    Jerry gave the CI robot `cluster-admin`. `ci-bot` (ServiceAccount in the
+    `dev-team` namespace) can currently do anything, anywhere — including read
+    every Secret in the cluster. GRIM-9 wants least privilege.
+
+    Replace the cluster-admin grant with exactly these permissions:
+
+      1. Delete the ClusterRoleBinding that gives `ci-bot` cluster-admin.
+      2. Namespaced access in `dev-team` (Role `ci-bot-dev` + RoleBinding):
+         full control (get/list/watch/create/update/patch/delete) of
+         `deployments`, `services`, and `configmaps`.
+      3. Read-only cluster access (ClusterRole `ci-bot-readonly` +
+         ClusterRoleBinding): `get`/`list` on `namespaces` and `nodes` only.
+
+    `ci-bot` must be able to create Deployments in `dev-team`, but must NOT be
+    able to delete Pods or read Secrets, and must no longer be cluster-admin.
 
   learningOutcomes:
-    - "Practice CKS domain: Cluster Hardening"
-    - "Apply concepts: RBAC Roles, RoleBindings, ClusterRoles, least privilege"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: System Hardening — minimize RBAC"
+    - "Scope permissions with Role/RoleBinding vs ClusterRole/ClusterRoleBinding"
+    - "Grant read-only cluster access without wildcards"
+    - "Verify effective permissions with kubectl auth can-i --as"
 
   tags:
     - "cks"
-    - "cks-cluster-hardening"
+    - "cks-system-hardening"
     - "tier-1"
     - "kind"
-    - "rbac-roles"
-    - "rolebindings"
-    - "clusterroles"
+    - "rbac"
     - "least-privilege"
-
 
   environment:
     type: kubernetes
     kubernetes:
       provider: kind
       createCluster: true
-      namespace: default
+      namespace: dev-team
+    customSetup:
+      - type: script
+        timeout: 120s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/broken-rbac.yaml
 
   checks:
-    - name: "Executable lab checks implemented"
+    - name: "ci-bot can create deployments in dev-team"
       type: script
       script: |
-        echo "CKS-005 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - No cluster-admin binding remains for ci-bot
-        - Role ci-bot-dev has correct namespace rules
-        - RoleBinding binds ci-bot-dev to ci-bot
-        - ClusterRole ci-bot-readonly has get/list on namespaces and nodes only
-        - ClusterRoleBinding binds ci-bot-readonly to ci-bot
-        - can-i create deployments yes; delete pods and get secrets no
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -euo pipefail
+        r=$(kubectl auth can-i create deployments -n dev-team --as=system:serviceaccount:dev-team:ci-bot)
+        [ "$r" = "yes" ] || { echo "expected yes, got: $r"; exit 1; }
+
+    - name: "ci-bot can get/list nodes (cluster read-only)"
+      type: script
+      script: |
+        set -euo pipefail
+        r=$(kubectl auth can-i list nodes --as=system:serviceaccount:dev-team:ci-bot)
+        [ "$r" = "yes" ] || { echo "expected yes, got: $r"; exit 1; }
+
+    - name: "ci-bot CANNOT delete pods in dev-team"
+      type: script
+      script: |
+        set -uo pipefail
+        r=$(kubectl auth can-i delete pods -n dev-team --as=system:serviceaccount:dev-team:ci-bot)
+        [ "$r" = "no" ] || { echo "ci-bot can still delete pods (got: $r)"; exit 1; }
+
+    - name: "ci-bot CANNOT read secrets"
+      type: script
+      script: |
+        set -uo pipefail
+        r=$(kubectl auth can-i get secrets -n dev-team --as=system:serviceaccount:dev-team:ci-bot)
+        [ "$r" = "no" ] || { echo "ci-bot can still read secrets (got: $r)"; exit 1; }
+
+    - name: "ci-bot is no longer cluster-admin"
+      type: script
+      script: |
+        set -uo pipefail
+        r=$(kubectl auth can-i '*' '*' --all-namespaces --as=system:serviceaccount:dev-team:ci-bot)
+        [ "$r" = "no" ] || { echo "ci-bot still has cluster-wide wildcard access (got: $r)"; exit 1; }
+
+    - name: "Role ci-bot-dev exists in dev-team"
+      type: resourceExists
+      namespace: dev-team
+      resource: role/ci-bot-dev
+
+    - name: "ClusterRole ci-bot-readonly exists"
+      type: resourceExists
+      resource: clusterrole/ci-bot-readonly
+
+    - name: "ci-bot-readonly grants no write verbs"
+      type: script
+      script: |
+        set -euo pipefail
+        verbs=$(kubectl get clusterrole ci-bot-readonly -o jsonpath='{.rules[*].verbs}')
+        for bad in create update patch delete deletecollection '\*'; do
+          if echo "$verbs" | grep -qw "$bad"; then echo "ci-bot-readonly contains write verb: $bad"; exit 1; fi
+        done
+        echo "read-only verbs only: $verbs"
 
   hints:
     - cost: 0
@@ -67,16 +122,26 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-005 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-005 complete. ci-bot is now least-privilege: it manages its own
+    namespace's deployments/services/configmaps, reads namespaces and nodes
+    cluster-wide, and can no longer touch Secrets or act as cluster-admin.
+
+    **Key takeaway:** prefer Role/RoleBinding (namespaced) and enumerate verbs
+    and resources explicitly. Wildcards and cluster-admin are the opposite of
+    least privilege. Always verify with `kubectl auth can-i --as`.
+
+  references:
+    - title: "Using RBAC Authorization"
+      url: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/"
 
   tasking:
     ticket: "CKS-005"
     priority: "P1"
     summary: "RBAC Least Privilege"
-    description: "Scaffolded CKS exercise for Cluster Hardening using kind infrastructure."
+    description: "ci-bot has cluster-admin. Replace with least-privilege Role/ClusterRole scoped to what CI actually needs."
     reporter: "GRIM-9"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry gave the CI bot the keys to the whole cluster. It can read every secret you own. Take the keys back and hand out only what it needs."
+    onCheckFail: "Still over-privileged (or under-privileged). Check both what ci-bot CAN and CANNOT do."
+    onComplete: "Least privilege achieved. The blast radius of a leaked CI token just shrank to one namespace."

@@ -1,8 +1,15 @@
-# CKS-012 — Hint 3 (cost 50)
-
-Full pod template:
-
-```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-api
+  namespace: app
+  labels: { app: backend-api }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: backend-api } }
+  template:
+    metadata:
+      labels: { app: backend-api }
     spec:
       securityContext:
         runAsUser: 1000
@@ -24,7 +31,3 @@ Full pod template:
       volumes:
         - name: tmp
           emptyDir: {}
-```
-
-Apply with `kubectl apply -f solution/backend-api.yaml`. Full manifest in
-`solution/`.
