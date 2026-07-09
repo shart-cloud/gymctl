@@ -12,15 +12,52 @@ spec:
   difficulty: beginner
   estimatedTime: 25m
   points: 100
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Use Trivy to scan nginx, redis, and a custom app image for HIGH/CRITICAL vulnerabilities, write reports, update Deployments using CRITICAL-vulnerable images to patched minor versions, and re-scan.
+    The `supply-chain` namespace runs three workloads, all pinned to OLD image
+    tags that carry documented HIGH/CRITICAL CVEs:
+
+      web-frontend   nginx:1.20.0-alpine   (pre-CVE-2021-23017 resolver fix)
+      session-cache  redis:6.2.6-alpine    (old 6.2.x, several HIGH/CRITICAL CVEs)
+      payments-app   python:3.9-alpine     (the custom app, on an EOL interpreter)
+
+    Trivy is installed on the host. Scan each image, read the report, and
+    remediate the CRITICAL offenders by moving each Deployment to a patched,
+    still-pinned tag.
+
+    1. Scan every image, filtered to what matters:
+
+         trivy image --severity HIGH,CRITICAL nginx:1.20.0-alpine
+         trivy image --severity HIGH,CRITICAL redis:6.2.6-alpine
+         trivy image --severity HIGH,CRITICAL python:3.9-alpine
+
+       (Keep the reports if you like — e.g. `trivy image ... > /tmp/nginx.txt`.)
+
+    2. Bump each Deployment to its patched tag (see the hints for the exact
+       target tags), keeping it PINNED — never `:latest`:
+
+         web-frontend   -> nginx:1.27.4-alpine
+         session-cache  -> redis:7.4.2-alpine
+         payments-app   -> python:3.12-alpine
+
+    3. Wait for the rollouts and re-scan to confirm the CRITICALs are gone.
+
+    When you are done, every Deployment must run its patched tag AND its pod
+    must be Ready — you patched the images without breaking the app.
+
+    NOTE ON DETERMINISM: Trivy's vuln database updates continuously, so the
+    checks below do NOT re-run a live scan (that verdict would rot). They assert
+    the reproducible outcome instead: the running image equals the specific
+    patched tag, and the pod is Available. The scan is the workflow that tells
+    you WHICH tag to move to; the tag is the fact that gets graded.
 
   learningOutcomes:
-    - "Practice CKS domain: Supply Chain Security"
-    - "Apply concepts: Trivy, vulnerability severity, remediation decisions"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Supply Chain Security — image vulnerability scanning"
+    - "Scan images with Trivy, filtered to HIGH/CRITICAL"
+    - "Read a Trivy report: severity, installed vs fixed version, triage"
+    - "Remediate CRITICAL images by moving Deployments to a patched pinned tag"
+    - "Verify the patch rolled out without breaking the workload"
 
   tags:
     - "cks"
@@ -31,28 +68,72 @@ spec:
     - "vulnerability-severity"
     - "remediation-decisions"
 
-
   environment:
     type: kubernetes
     kubernetes:
       provider: kind
       createCluster: true
-      namespace: default
+      namespace: supply-chain
+    customSetup:
+      # Deploy the three workloads on their intentionally vulnerable pinned tags.
+      - type: script
+        timeout: 300s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/namespace.yaml
+          kubectl apply -f setup/workloads.yaml
+          kubectl -n supply-chain rollout status deploy/web-frontend  --timeout=180s
+          kubectl -n supply-chain rollout status deploy/session-cache --timeout=180s
+          kubectl -n supply-chain rollout status deploy/payments-app  --timeout=180s
 
   checks:
-    - name: "Executable lab checks implemented"
-      type: script
-      script: |
-        echo "CKS-018 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - Scan result files exist
-        - Deployments using vulnerable images are updated
-        - Re-scan shows no CRITICAL vulnerabilities
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+    # --- web-frontend (nginx) ---
+    - name: "web-frontend runs the PATCHED nginx tag (not the vulnerable one)"
+      type: jsonpath
+      namespace: supply-chain
+      resource: deployment/web-frontend
+      jsonpath: "{.spec.template.spec.containers[0].image}"
+      operator: equals
+      value: "nginx:1.27.4-alpine"
+
+    - name: "web-frontend pod is Available (app still runs after the bump)"
+      type: condition
+      namespace: supply-chain
+      resource: deployment/web-frontend
+      condition: Available
+      status: "True"
+
+    # --- session-cache (redis) ---
+    - name: "session-cache runs the PATCHED redis tag (not the vulnerable one)"
+      type: jsonpath
+      namespace: supply-chain
+      resource: deployment/session-cache
+      jsonpath: "{.spec.template.spec.containers[0].image}"
+      operator: equals
+      value: "redis:7.4.2-alpine"
+
+    - name: "session-cache pod is Available (app still runs after the bump)"
+      type: condition
+      namespace: supply-chain
+      resource: deployment/session-cache
+      condition: Available
+      status: "True"
+
+    # --- payments-app (custom app) ---
+    - name: "payments-app runs the PATCHED python tag (not the vulnerable one)"
+      type: jsonpath
+      namespace: supply-chain
+      resource: deployment/payments-app
+      jsonpath: "{.spec.template.spec.containers[0].image}"
+      operator: equals
+      value: "python:3.12-alpine"
+
+    - name: "payments-app pod is Available (app still runs after the bump)"
+      type: condition
+      namespace: supply-chain
+      resource: deployment/payments-app
+      condition: Available
+      status: "True"
 
   hints:
     - cost: 0
@@ -63,9 +144,23 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-018 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-018 complete. All three workloads moved off their vulnerable tags onto
+    patched, pinned images — nginx 1.27.4, redis 7.4.2, python 3.12 — and every
+    pod is still Ready.
+
+    **Key takeaway:** scanning is only the first half. `trivy image
+    --severity HIGH,CRITICAL` tells you which images carry fixable CRITICALs;
+    remediation is bumping to a patched, PINNED tag and rolling it out without
+    breaking the app. Pin, don't chase `:latest` — a pinned tag makes the scan
+    reproducible and the rollout auditable.
+
+  references:
+    - title: "Trivy: scanning container images"
+      url: "https://aquasecurity.github.io/trivy/latest/docs/target/container_image/"
+    - title: "CVE-2021-23017 (nginx resolver)"
+      url: "https://nvd.nist.gov/vuln/detail/CVE-2021-23017"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry pinned the whole payments stack to images from the before-times. Trivy is on the host — scan them, find the CRITICALs, and bump each Deployment to a patched tag before the supply-chain auditors do it for you."
+    onCheckFail: "Still on a vulnerable tag, or a pod fell over during the roll. Check both: the running image must equal the patched tag AND the pod must be Ready."
+    onComplete: "Off the old tags, onto patched pins, and nothing crashed. Jerry has three fewer CVE piles to trip over."

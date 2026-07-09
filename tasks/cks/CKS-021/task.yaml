@@ -12,15 +12,57 @@ spec:
   difficulty: intermediate
   estimatedTime: 35m
   points: 140
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Run kubesec and kube-linter against `/root/manifests/`, save outputs, fix all CRITICAL/HIGH issues, re-run tools, apply fixed manifests to `staging`, and verify workloads run.
+    Jerry is about to ship two workloads into the `staging` namespace and asked
+    you to "just apply them". Don't. Shift the security check left: scan the
+    manifests statically, fix what the scanners flag, and only then apply.
+
+    Your work directory holds the manifests under `manifests/`:
+
+      manifests/web.yaml   — an nginx frontend running **privileged**, as **root**,
+                             with a writable root filesystem, no dropped
+                             capabilities, no resource limits, off `:latest`.
+      manifests/api.yaml   — a busybox backend that shares the node: **hostNetwork**,
+                             **hostPID**, a **hostPath** volume mounting `/`, root
+                             user, privilege escalation allowed, no limits.
+
+    Two static analysers are available as pinned container images (kubesec and
+    kube-linter are NOT installed on the host — run them via docker):
+
+        # kubesec — reads a single manifest on stdin, scores it, lists CRITICALs
+        docker run --rm -i kubesec/kubesec:v2 scan /dev/stdin < manifests/web.yaml
+
+        # kube-linter — lints every manifest in a directory
+        docker run --rm -v "$PWD/manifests:/m" \
+          stackrox/kube-linter:v0.7.4 lint /m
+
+    Do this:
+
+      1. Scan both manifests. Save the outputs into a `reports/` directory in
+         your work dir — `reports/kubesec.json` and `reports/kube-linter.txt`.
+      2. Read the CRITICAL / HIGH findings and fix **every** one in the manifest
+         files: run as non-root, read-only root filesystem, drop ALL
+         capabilities, no privileged / no privilege escalation, set CPU + memory
+         requests and limits, and remove all host namespaces / hostPath.
+      3. Re-scan to confirm the CRITICALs are gone.
+      4. Apply the hardened manifests to `staging` and confirm both Deployments
+         actually roll out — hardening must not break the app.
+
+    The checks assert the security controls directly on the applied objects with
+    `kubectl -o jsonpath` (deterministic — they do not parse scanner score text)
+    and confirm both Deployments are Available.
+
+    Trap: a read-only root filesystem stops nginx from starting unless you give
+    it writable scratch space. Mount `emptyDir` volumes for the paths it needs.
 
   learningOutcomes:
-    - "Practice CKS domain: Supply Chain Security"
-    - "Apply concepts: kubesec, kube-linter, static analysis, shift-left security"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Supply Chain Security — static manifest analysis (shift-left)"
+    - "Run kubesec and kube-linter against Kubernetes manifests"
+    - "Map scanner findings to concrete securityContext / resource fixes"
+    - "Harden a Pod: non-root, read-only rootfs, drop ALL caps, limits, no host access"
+    - "Prove the hardened workloads still run in the cluster"
 
   tags:
     - "cks"
@@ -32,29 +74,167 @@ spec:
     - "static-analysis"
     - "shift-left-security"
 
-
   environment:
     type: kubernetes
     kubernetes:
       provider: kind
       createCluster: true
-      namespace: default
+      namespace: staging
+    customSetup:
+      # Create the target namespace and stage the INSECURE manifests into the
+      # learner's work directory. Nothing is applied to the cluster yet — the
+      # whole point is to scan and fix the files before they ever hit staging.
+      - type: script
+        timeout: 120s
+        script: |
+          set -euo pipefail
+          kubectl create namespace staging \
+            --dry-run=client -o yaml | kubectl apply -f -
+          WD="$HOME/.gym/workdir/cks-021-manifest-static-analysis-pipeline"
+          mkdir -p "$WD/manifests" "$WD/reports"
+          cp setup/manifests/web.yaml setup/manifests/api.yaml "$WD/manifests/"
+          echo "Staged insecure manifests into $WD/manifests"
+          echo "Save scanner outputs into $WD/reports (kubesec.json, kube-linter.txt)"
 
   checks:
-    - name: "Executable lab checks implemented"
+    - name: "staging namespace exists"
+      type: resourceExists
+      resource: namespace/staging
+
+    # ---- NEGATIVE: the security controls, asserted on the applied objects ----
+    # Each loops over both workloads; RED in the broken state (objects absent,
+    # or present but insecure) and only GREEN once the hardened manifests apply.
+
+    - name: "every staging workload runs as non-root (runAsNonRoot=true)"
       type: script
       script: |
-        echo "CKS-021 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - Analysis outputs exist
-        - Fixed manifests address CRITICAL/HIGH findings
-        - Re-scan shows no CRITICAL/HIGH issues
-        - All workloads run in staging
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -uo pipefail
+        fail=0
+        for d in web api; do
+          v=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.containers[0].securityContext.runAsNonRoot}' 2>/dev/null || true)
+          if [ "$v" != "true" ]; then
+            echo "deploy/$d: runAsNonRoot must be true (got '${v:-<unset>}')"; fail=1
+          fi
+        done
+        [ "$fail" -eq 0 ] || exit 1
+        echo "web + api both set runAsNonRoot=true"
+
+    - name: "every staging workload has a read-only root filesystem"
+      type: script
+      script: |
+        set -uo pipefail
+        fail=0
+        for d in web api; do
+          v=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem}' 2>/dev/null || true)
+          if [ "$v" != "true" ]; then
+            echo "deploy/$d: readOnlyRootFilesystem must be true (got '${v:-<unset>}')"; fail=1
+          fi
+        done
+        [ "$fail" -eq 0 ] || exit 1
+        echo "web + api both set readOnlyRootFilesystem=true"
+
+    - name: "every staging workload drops ALL capabilities"
+      type: script
+      script: |
+        set -uo pipefail
+        fail=0
+        for d in web api; do
+          drop=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.containers[0].securityContext.capabilities.drop}' 2>/dev/null || true)
+          if ! printf '%s' "$drop" | grep -q 'ALL'; then
+            echo "deploy/$d: capabilities.drop must contain ALL (got '${drop:-<unset>}')"; fail=1
+          fi
+        done
+        [ "$fail" -eq 0 ] || exit 1
+        echo "web + api both drop ALL capabilities"
+
+    - name: "no staging workload is privileged or allows privilege escalation"
+      type: script
+      script: |
+        set -uo pipefail
+        fail=0
+        for d in web api; do
+          priv=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.containers[0].securityContext.privileged}' 2>/dev/null || true)
+          esc=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation}' 2>/dev/null || true)
+          if [ "$priv" = "true" ]; then
+            echo "deploy/$d: privileged must not be true"; fail=1
+          fi
+          if [ "$esc" != "false" ]; then
+            echo "deploy/$d: allowPrivilegeEscalation must be false (got '${esc:-<unset>}')"; fail=1
+          fi
+        done
+        [ "$fail" -eq 0 ] || exit 1
+        echo "web + api: not privileged, no privilege escalation"
+
+    - name: "every staging workload sets CPU + memory limits"
+      type: script
+      script: |
+        set -uo pipefail
+        fail=0
+        for d in web api; do
+          cpu=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}' 2>/dev/null || true)
+          mem=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.containers[0].resources.limits.memory}' 2>/dev/null || true)
+          if [ -z "$cpu" ] || [ -z "$mem" ]; then
+            echo "deploy/$d: resources.limits must set cpu and memory (cpu='${cpu:-}' memory='${mem:-}')"; fail=1
+          fi
+        done
+        [ "$fail" -eq 0 ] || exit 1
+        echo "web + api both set CPU and memory limits"
+
+    - name: "no staging workload uses host namespaces or hostPath"
+      type: script
+      script: |
+        set -uo pipefail
+        fail=0
+        for d in web api; do
+          hn=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.hostNetwork}' 2>/dev/null || true)
+          hp=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.hostPID}' 2>/dev/null || true)
+          hi=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.hostIPC}' 2>/dev/null || true)
+          hpath=$(kubectl -n staging get deploy "$d" -o jsonpath='{.spec.template.spec.volumes[*].hostPath.path}' 2>/dev/null || true)
+          if [ "$hn" = "true" ] || [ "$hp" = "true" ] || [ "$hi" = "true" ]; then
+            echo "deploy/$d: must not use hostNetwork/hostPID/hostIPC"; fail=1
+          fi
+          if [ -n "$hpath" ]; then
+            echo "deploy/$d: must not mount a hostPath volume (got '$hpath')"; fail=1
+          fi
+        done
+        [ "$fail" -eq 0 ] || exit 1
+        echo "web + api: no host namespaces, no hostPath"
+
+    # ---- POSITIVE: the hardened workloads actually run ----
+
+    - name: "web Deployment is Available in staging"
+      type: script
+      script: |
+        set -uo pipefail
+        ready=0
+        for i in $(seq 1 30); do
+          ready=$(kubectl -n staging get deploy web -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)
+          [ "${ready:-0}" -ge 1 ] && break
+          sleep 2
+        done
+        if [ "${ready:-0}" -lt 1 ]; then
+          echo "web has no available replicas — the hardened pod is not running"
+          kubectl -n staging get pods -l app=web 2>/dev/null || true
+          exit 1
+        fi
+        echo "web is Available ($ready replica ready)"
+
+    - name: "api Deployment is Available in staging"
+      type: script
+      script: |
+        set -uo pipefail
+        ready=0
+        for i in $(seq 1 30); do
+          ready=$(kubectl -n staging get deploy api -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)
+          [ "${ready:-0}" -ge 1 ] && break
+          sleep 2
+        done
+        if [ "${ready:-0}" -lt 1 ]; then
+          echo "api has no available replicas — the hardened pod is not running"
+          kubectl -n staging get pods -l app=api 2>/dev/null || true
+          exit 1
+        fi
+        echo "api is Available ($ready replica ready)"
 
   hints:
     - cost: 0
@@ -65,9 +245,27 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-021 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-021 complete. You scanned the manifests before applying them, mapped
+    every CRITICAL/HIGH finding to a concrete fix, and shipped two workloads to
+    `staging` that run as non-root with a read-only root filesystem, all
+    capabilities dropped, resource limits set, and no host access — and both
+    still roll out.
+
+    **Key takeaway:** static analysis is shift-left security. kubesec and
+    kube-linter catch privileged/root/writable-rootfs/host-access manifests
+    before they ever reach the cluster. The scanners only flag; you decide the
+    fix — and a read-only rootfs means giving the app writable `emptyDir`
+    scratch space instead of the whole filesystem.
+
+  references:
+    - title: "kubesec — security risk analysis for Kubernetes resources"
+      url: "https://kubesec.io/"
+    - title: "kube-linter checks"
+      url: "https://docs.kubelinter.io/#/generated/checks"
+    - title: "Configure a Security Context for a Pod or Container"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry wants to `kubectl apply` two manifests straight into staging. One is privileged and root; the other mounts the whole node at /host. Scan them first, fix what the scanners scream about, then apply."
+    onCheckFail: "Either the manifests aren't hardened yet or the hardened pods aren't running. Scan with kubesec + kube-linter, fix every CRITICAL, and remember a read-only rootfs needs writable emptyDir scratch space."
+    onComplete: "Scanned, hardened, and running. Jerry never got to apply the privileged one. Fewer sharp objects in staging."

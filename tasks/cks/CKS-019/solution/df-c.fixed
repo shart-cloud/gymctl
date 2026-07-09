@@ -1,0 +1,15 @@
+# df-c — hardened tools image.
+# Pinned slim base, no sudo, no junk packages, least-privilege perms,
+# non-root, health-checked.
+FROM debian:12-slim
+
+# Own directory with sane, least-privilege permissions instead of chmod 777.
+RUN mkdir -p /opt/app && chmod 0755 /opt/app
+
+# Non-root, fixed UID, no interactive login shell.
+RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin appuser
+USER appuser
+
+HEALTHCHECK CMD ["true"]
+
+CMD ["sleep", "infinity"]

@@ -12,49 +12,126 @@ spec:
   difficulty: beginner
   estimatedTime: 25m
   points: 100
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Rewrite `/root/app/Dockerfile` for a Go app from a 1.2GB Ubuntu build image to a multi-stage build using `golang:1.22-alpine` and `gcr.io/distroless/static-debian12`, run as non-root, build `app:secure`, and verify size and behavior.
+    Jerry containerised the payments health service by apt-installing the whole
+    Go toolchain on top of Ubuntu and shipping the result. The image is ~870MB,
+    runs as root, and carries a shell, a package manager, git and a C compiler
+    into production — none of which the running app needs. That is a lot of
+    attack surface for a 7MB binary.
+
+    Your workspace has the app under `app/`:
+
+      app/main.go      — a tiny HTTP server that returns 200 on :8080
+      app/go.mod       — no third-party dependencies (so it builds fully static)
+      app/Dockerfile   — the bloated single-stage Ubuntu build (fix THIS)
+
+    Rewrite `app/Dockerfile` into a hardened multi-stage build:
+
+      1. Builder stage on `golang:1.22-alpine` compiles a static binary
+         (`CGO_ENABLED=0`).
+      2. Final stage on `gcr.io/distroless/static-debian12` copies only the
+         binary — no shell, no package manager, no toolchain.
+      3. The final image runs as a non-root user.
+
+    Then build it as `app:secure`:
+
+        docker build -t app:secure app
+
+    When you are done the image must be small, run as non-root, and still answer
+    HTTP 200 on :8080 — the checks build `app:secure` from your Dockerfile and
+    verify all four.
 
   learningOutcomes:
-    - "Practice CKS domain: Supply Chain Security"
-    - "Apply concepts: multi-stage builds, distroless images, image layer reduction"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Supply Chain Security — minimize base image footprint"
+    - "Split build tooling from runtime with a multi-stage build"
+    - "Ship a static Go binary on a distroless base (no shell / no package manager)"
+    - "Drop root in the final image and shrink it by ~99%"
+    - "Verify the hardened image still serves traffic"
 
   tags:
     - "cks"
     - "cks-supply-chain-security"
     - "tier-1"
-    - "kind"
+    - "docker"
     - "multi-stage-builds"
     - "distroless-images"
     - "image-layer-reduction"
 
-
   environment:
-    type: kubernetes
-    kubernetes:
-      provider: kind
-      createCluster: true
-      namespace: default
+    type: docker
+    docker:
+      # Stage the BROKEN state into the learner's work directory. The whole app/
+      # tree (working Go server + the bloated single-stage Dockerfile) is copied
+      # in; the learner edits app/Dockerfile in place.
+      copyFiles:
+        - from: setup/app
+          to: app
 
+  # NOTE: for docker-env exercises the checks run with the work directory as
+  # their cwd, so relative paths like `app/Dockerfile` resolve correctly.
   checks:
-    - name: "Executable lab checks implemented"
+    - name: "app:secure builds from app/Dockerfile"
       type: script
       script: |
-        echo "CKS-017 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - Dockerfile uses multi-stage build
-        - Final stage uses distroless
-        - Final image runs as non-root
-        - Image size below 20MB
-        - Container runs and app responds
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -euo pipefail
+        docker build -t app:secure -f app/Dockerfile app >/dev/null
+        echo "app:secure built"
+
+    - name: "Dockerfile uses a multi-stage build (2+ FROM)"
+      type: dockerfile
+      path: app/Dockerfile
+      check: multiStage
+      operator: equals
+      value: "true"
+
+    - name: "Final stage is a distroless base image"
+      type: dockerfile
+      path: app/Dockerfile
+      check: baseImage
+      operator: regex
+      value: "gcr\\.io/distroless"
+
+    - name: "app:secure runs as a non-root user"
+      type: script
+      script: |
+        set -euo pipefail
+        u=$(docker image inspect app:secure --format '{{.Config.User}}')
+        if [ -z "$u" ] || [ "$u" = "root" ] || [ "$u" = "0" ]; then
+          echo "app:secure runs as root (USER='$u') — set a non-root USER in the final stage"; exit 1
+        fi
+        echo "app:secure runs as non-root user: $u"
+
+    - name: "app:secure is small (< 20MB)"
+      type: docker-image
+      image: app:secure
+      property: size
+      operator: lessThan
+      value: "20MB"
+
+    - name: "app:secure still serves HTTP 200 on :8080"
+      type: script
+      script: |
+        set -uo pipefail
+        cid=$(docker run -d -p 18080:8080 app:secure)
+        cleanup() { docker rm -f "$cid" >/dev/null 2>&1 || true; }
+        trap cleanup EXIT
+        probe() {
+          if command -v curl >/dev/null 2>&1; then
+            curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:18080/" 2>/dev/null
+          else
+            wget -q -S -O /dev/null "http://127.0.0.1:18080/" 2>&1 | awk '/HTTP\//{print $2; exit}'
+          fi
+        }
+        code=""
+        for i in $(seq 1 20); do
+          code=$(probe || true)
+          [ "$code" = "200" ] && break
+          sleep 0.5
+        done
+        [ "$code" = "200" ] || { echo "app did not return 200 (got '$code')"; exit 1; }
+        echo "app responded 200 on :8080"
 
   hints:
     - cost: 0
@@ -65,9 +142,22 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-017 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-017 complete. `app:secure` dropped from ~870MB to under 10MB, no longer
+    runs as root, and ships no shell or package manager — yet it still answers
+    200 on :8080.
+
+    **Key takeaway:** a multi-stage build keeps the toolchain in the builder and
+    ships only the artifact. A static binary (`CGO_ENABLED=0`) on a distroless
+    base removes the entire OS userland — the smaller the image, the smaller the
+    attack surface and the fewer CVEs you inherit. Drop root while you're at it.
+
+  references:
+    - title: "Docker multi-stage builds"
+      url: "https://docs.docker.com/build/building/multi-stage/"
+    - title: "Distroless container images"
+      url: "https://github.com/GoogleContainerTools/distroless"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry shipped an 870MB image to run a 7MB binary — with a root shell and apt still inside. Trim it to just the binary before the supply-chain auditors find the compiler in prod."
+    onCheckFail: "Still bloated, still root, or it stopped answering. Check all four: multi-stage, distroless final, non-root USER, and that :8080 still returns 200."
+    onComplete: "Down to the binary and nothing else. No shell, no apt, no root. Jerry has far fewer sharp objects in that image now."

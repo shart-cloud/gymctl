@@ -12,50 +12,156 @@ spec:
   difficulty: intermediate
   estimatedTime: 35m
   points: 140
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Audit three Dockerfiles under `/root/dockerfiles/` with hadolint and manual checks, write corrected `<name>.fixed` files, build each fixed image, and verify they work.
+    Jerry left three Dockerfiles in `dockerfiles/` (in your work directory) and
+    shipped them all to prod. Each builds, and each is a supply-chain problem:
+
+      - `df-a` — floating `:latest` base, `ADD` of a remote URL, runs as root.
+      - `df-b` — a hardcoded API key and DB password baked into layers, plus a
+        `wget … | sh` that runs unverified remote code.
+      - `df-c` — an unpinned base, unneeded/risky packages, `chmod 777`, `sudo`
+        in the container, and no health check.
+
+    Audit each one with **hadolint** and manual review, then write a corrected
+    file next to it named `<name>.fixed` — that is `df-a.fixed`, `df-b.fixed`,
+    and `df-c.fixed`. Each fixed file must:
+
+      1. Pin its base image to a specific tag (no `:latest`).
+      2. Run as a non-root `USER`.
+      3. Contain no secrets.
+      4. Use `COPY` (not remote `ADD`) and no `curl|sh`.
+      5. Pass hadolint with **zero** findings.
+      6. Still `docker build` successfully.
+
+    hadolint is not installed on the host — run it from its official image:
+
+      docker run --rm -i hadolint/hadolint:v2.12.0 hadolint - < dockerfiles/df-a
+
+    Build a fixed image with, e.g.:
+
+      docker build -f dockerfiles/df-a.fixed -t cks019-df-a:fixed dockerfiles/
 
   learningOutcomes:
-    - "Practice CKS domain: Supply Chain Security"
-    - "Apply concepts: Dockerfile best practices, security anti-patterns, hadolint"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Supply Chain Security — Dockerfile hardening"
+    - "Audit images with hadolint and read the DL#### rule codes"
+    - "Pin base images, drop root, and keep secrets out of image layers"
+    - "Replace remote ADD / curl|sh with hermetic, verifiable build steps"
+    - "Prove the hardened image still builds and runs non-root"
 
   tags:
     - "cks"
     - "cks-supply-chain-security"
     - "tier-2"
-    - "kind"
+    - "docker"
     - "dockerfile-best-practices"
     - "security-anti-patterns"
     - "hadolint"
 
-
   environment:
-    type: kubernetes
-    kubernetes:
-      provider: kind
-      createCluster: true
-      namespace: default
+    type: docker
+    docker:
+      copyFiles:
+        - from: setup/dockerfiles/
+          to: dockerfiles/
 
   checks:
-    - name: "Executable lab checks implemented"
+    - name: "All three fixed Dockerfiles exist"
       type: script
       script: |
-        echo "CKS-019 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - Hadolint output files exist
-        - Fixed Dockerfiles address findings
-        - No secrets in build layers
-        - All images specify non-root USER
-        - Base images use specific tags
-        - Fixed Dockerfiles build successfully
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -u
+        missing=""
+        for n in a b c; do
+          f="dockerfiles/df-$n.fixed"
+          [ -f "$f" ] || missing="$missing $f"
+        done
+        [ -z "$missing" ] || { echo "missing fixed Dockerfiles:$missing"; exit 1; }
+        echo "df-a.fixed, df-b.fixed, df-c.fixed all present"
+
+    - name: "Fixed Dockerfiles pin a specific base tag (no :latest)"
+      type: script
+      script: |
+        set -u
+        for n in a b c; do
+          f="dockerfiles/df-$n.fixed"
+          [ -f "$f" ] || { echo "$f is missing"; exit 1; }
+          from=$(grep -iE '^[[:space:]]*FROM[[:space:]]' "$f" | head -1)
+          if echo "$from" | grep -qi ':latest'; then
+            echo "$f still floats latest -> $from"; exit 1
+          fi
+          if ! echo "$from" | grep -qE '(:[A-Za-z0-9._-]+|@sha256:)'; then
+            echo "$f base image is not pinned to a tag/digest -> $from"; exit 1
+          fi
+        done
+        echo "every fixed base image is pinned"
+
+    - name: "Fixed Dockerfiles declare a non-root USER"
+      type: script
+      script: |
+        set -u
+        for n in a b c; do
+          f="dockerfiles/df-$n.fixed"
+          [ -f "$f" ] || { echo "$f is missing"; exit 1; }
+          user=$(grep -iE '^[[:space:]]*USER[[:space:]]' "$f" | tail -1 | awk '{print $2}')
+          [ -n "$user" ] || { echo "$f has no USER instruction (runs as root)"; exit 1; }
+          case "$user" in
+            root|0|0:*|root:*) echo "$f last USER is root ($user)"; exit 1;;
+          esac
+        done
+        echo "every fixed image drops to a non-root USER"
+
+    - name: "No secrets remain in the fixed Dockerfiles"
+      type: script
+      script: |
+        set -u
+        for n in a b c; do
+          f="dockerfiles/df-$n.fixed"
+          [ -f "$f" ] || { echo "$f is missing"; exit 1; }
+          if grep -qiE 'sk_live_|hunter2|DB_PASSWORD' "$f"; then
+            echo "$f still contains a planted secret:"
+            grep -niE 'sk_live_|hunter2|DB_PASSWORD' "$f"
+            exit 1
+          fi
+        done
+        echo "no planted secrets remain in any fixed Dockerfile"
+
+    - name: "hadolint reports zero findings on every fixed Dockerfile"
+      type: script
+      script: |
+        set -u
+        img=hadolint/hadolint:v2.12.0
+        for n in a b c; do
+          f="dockerfiles/df-$n.fixed"
+          [ -f "$f" ] || { echo "$f is missing"; exit 1; }
+          out=$(docker run --rm -i "$img" hadolint --no-fail - < "$f")
+          if [ -n "$out" ]; then
+            echo "hadolint findings in $f:"
+            echo "$out"
+            exit 1
+          fi
+        done
+        echo "hadolint is clean on df-a.fixed, df-b.fixed, df-c.fixed"
+
+    - name: "Every fixed Dockerfile builds successfully"
+      type: script
+      script: |
+        set -u
+        rc=0
+        for n in a b c; do
+          f="dockerfiles/df-$n.fixed"
+          [ -f "$f" ] || { echo "$f is missing"; exit 1; }
+          tag="cks019-df-$n:fixed"
+          if docker build -q -f "$f" -t "$tag" dockerfiles/ >"/tmp/cks019-build-$n.log" 2>&1; then
+            echo "$f builds OK"
+          else
+            echo "$f FAILED to build:"
+            cat "/tmp/cks019-build-$n.log"
+            rc=1
+          fi
+          docker rmi -f "$tag" >/dev/null 2>&1 || true
+        done
+        exit $rc
 
   hints:
     - cost: 0
@@ -66,9 +172,22 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-019 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-019 complete. All three Dockerfiles are pinned, non-root, secret-free,
+    and hadolint-clean — and they still build.
+
+    **Key takeaway:** an image is a supply-chain artifact. Pin your bases so
+    builds are reproducible, keep secrets out of layers (they are trivially
+    extractable), never pipe the network into a shell, and drop root at build
+    time so the default runtime user is unprivileged. hadolint catches the
+    mechanical smells; the judgement calls (remote ADD, baked secrets) are yours.
+
+  references:
+    - title: "hadolint — Dockerfile linter rules"
+      url: "https://github.com/hadolint/hadolint#rules"
+    - title: "Docker: Dockerfile best practices"
+      url: "https://docs.docker.com/develop/develop-images/dockerfile_best-practices/"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry shipped three Dockerfiles with a secret, a curl-pipe-sh, and a base image that changes under him. Audit them, write the .fixed versions, and prove they still build."
+    onCheckFail: "Still findings. Run hadolint on each .fixed, and remember hadolint won't catch the remote ADD or the baked-in secret for you."
+    onComplete: "Clean images. Jerry has fewer sharp objects, and the SBOM finally makes sense."

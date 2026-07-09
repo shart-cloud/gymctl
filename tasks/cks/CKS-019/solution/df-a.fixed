@@ -1,0 +1,14 @@
+# df-a — hardened landing-page image.
+# Pinned base, local COPY instead of remote ADD, non-root, health-checked.
+FROM alpine:3.20
+
+# Ship the page from the build context. Reproducible, no network, no MITM.
+COPY index.html /var/www/index.html
+
+# Run as an unprivileged, fixed-UID account instead of root.
+RUN adduser -D -u 10001 appuser
+USER appuser
+
+HEALTHCHECK CMD ["true"]
+
+CMD ["cat", "/var/www/index.html"]

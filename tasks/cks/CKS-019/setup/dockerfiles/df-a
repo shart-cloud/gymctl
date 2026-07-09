@@ -1,0 +1,11 @@
+# df-a — "landing page" image.
+# Jerry wrote this in a hurry. It builds, but a supply-chain reviewer would
+# reject it on sight. Audit it with hadolint and manual review.
+FROM alpine:latest
+
+# Why pull the page over the network at build time when it is right here in the
+# build context? A remote ADD is non-reproducible and a MITM foothold.
+ADD https://raw.githubusercontent.com/hadolint/hadolint/master/README.md /var/www/index.html
+
+# No USER — this image runs everything as root.
+CMD cat /var/www/index.html

@@ -1,0 +1,14 @@
+# df-b — hardened worker image.
+# No baked-in secrets, no curl|sh, pinned base, non-root.
+FROM alpine:3.20
+
+# Application code comes from the build context, verified in source control.
+COPY app.sh /app/app.sh
+
+# Run as an unprivileged, fixed-UID account.
+RUN adduser -D -u 10001 appuser
+USER appuser
+
+# The API key and DB password are injected at runtime (docker run -e API_KEY=...
+# or a mounted secret), never written into an image layer.
+ENTRYPOINT ["/app/app.sh"]

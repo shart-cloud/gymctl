@@ -1,0 +1,16 @@
+# df-c — "tools" image.
+# Kitchen-sink packages, world-writable paths, sudo, an unpinned base, and no
+# health check. Trim it to least privilege.
+FROM ubuntu:latest
+
+# Unnecessary, attack-surface-expanding packages, installed without cleanup.
+RUN apt-get update && apt-get install -y sudo telnet netcat-traditional
+
+# chmod 777 makes the path writable by every user in the container.
+RUN chmod 777 /opt
+
+# sudo inside a container is an anti-pattern — the process is already root.
+RUN sudo echo hardened
+
+# No USER, no HEALTHCHECK.
+CMD bash

@@ -1,0 +1,17 @@
+# df-b — "worker" image.
+# This one bakes credentials into the layers and installs software by piping
+# the internet straight into a shell. Both are classic supply-chain failures.
+FROM alpine:latest
+
+# A secret in an ENV/layer is readable by anyone who can `docker history` or
+# pull the image. Rotate it and inject at runtime instead.
+ENV API_KEY=sk_live_EXAMPLE_NOT_A_REAL_KEY_CKS019
+
+# Same problem, different disguise: a password written into an image layer.
+RUN mkdir -p /app && echo "DB_PASSWORD=hunter2" > /app/db.env
+
+# curl | sh (here wget | sh): you run whatever the server serves, unverified.
+RUN wget -qO- https://get.example.com/install.sh | sh
+
+# No USER — runs as root.
+CMD sh -c "echo df-b up"

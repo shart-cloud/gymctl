@@ -1,0 +1,38 @@
+# INSECURE — this is the manifest you must harden before applying it.
+# This backend reaches straight into the node: hostNetwork + hostPID share the
+# host's network and process namespaces, and a hostPath volume mounts the entire
+# node filesystem at /host. It also runs as root with privilege escalation
+# allowed, no dropped capabilities and no resource limits.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: staging
+  labels:
+    app: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - name: api
+          image: busybox:latest
+          command: ["sh", "-c", "while true; do sleep 3600; done"]
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: true
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /

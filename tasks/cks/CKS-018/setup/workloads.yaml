@@ -1,0 +1,84 @@
+# The payments platform, running three workloads on OUTDATED, pinned image tags.
+# Each tag is old enough to carry documented HIGH/CRITICAL CVEs; the exercise is
+# to scan them with Trivy and bump the CRITICAL offenders to a patched tag.
+#
+# Images are the small Alpine variants so the cluster pulls them quickly.
+#
+#   web-frontend  nginx:1.20.0-alpine   — pre-1.21.0, exposed to CVE-2021-23017
+#                                         (nginx resolver off-by-one, CRITICAL)
+#   session-cache redis:6.2.6-alpine    — old 6.2.x, multiple HIGH/CRITICAL CVEs
+#   payments-app  python:3.9-alpine     — the "custom app": a stand-in HTTP
+#                                         server on an end-of-support interpreter
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-frontend
+  namespace: supply-chain
+  labels:
+    app: web-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-frontend
+  template:
+    metadata:
+      labels:
+        app: web-frontend
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.20.0-alpine
+          ports:
+            - containerPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: session-cache
+  namespace: supply-chain
+  labels:
+    app: session-cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: session-cache
+  template:
+    metadata:
+      labels:
+        app: session-cache
+    spec:
+      containers:
+        - name: redis
+          image: redis:6.2.6-alpine
+          ports:
+            - containerPort: 6379
+---
+# The "custom app": in production this is your own image; here it is a tiny
+# HTTP server so the pod stays Running and Ready. What matters for the exercise
+# is that it ships on an outdated, vulnerable base tag.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-app
+  namespace: supply-chain
+  labels:
+    app: payments-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments-app
+  template:
+    metadata:
+      labels:
+        app: payments-app
+    spec:
+      containers:
+        - name: app
+          image: python:3.9-alpine
+          command: ["python", "-m", "http.server", "8080"]
+          ports:
+            - containerPort: 8080

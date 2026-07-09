@@ -1,0 +1,30 @@
+# INSECURE — this is the manifest you must harden before applying it.
+# kubesec and kube-linter both flag this workload hard: it runs privileged,
+# as root (uid 0), with a writable root filesystem, no dropped capabilities
+# and no resource limits, off a mutable `:latest` tag.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: staging
+  labels:
+    app: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            allowPrivilegeEscalation: true
