@@ -26,6 +26,7 @@ const (
 	viewExerciseDetail
 	viewHintPeek
 	viewStartConfirm
+	viewCheckRun
 )
 
 type trackSummary struct {
@@ -78,6 +79,17 @@ type Model struct {
 	frame int
 	// petMood is Jerry's current mood, set by lifecycle actions.
 	petMood pet.Mood
+
+	// Streaming-check state (viewCheckRun). checkOutput accumulates the lines
+	// of `gymctl check` as they arrive; checkScroll is the scroll offset into
+	// it (checkFollow pins the view to the tail); checkRunning is true while the
+	// process is live so Jerry stays in the thinking mood.
+	checkOutput  []string
+	checkScroll  int
+	checkFollow  bool
+	checkRunning bool
+	// checkEvents is the live stream drained while a check runs.
+	checkEvents chan checkEventMsg
 }
 
 // tickMsg drives the pet animation (idle-blink).
@@ -199,6 +211,17 @@ func (m Model) visibleListRows() int {
 // visibleHintRows returns how many hint content lines fit given the current terminal height.
 func (m Model) visibleHintRows() int {
 	const overhead = 8
+	v := m.height - overhead
+	if v < 5 {
+		return 5
+	}
+	return v
+}
+
+// visibleCheckRows returns how many streamed check-output lines fit given the
+// current terminal height, leaving room for the header, Jerry, and footer.
+func (m Model) visibleCheckRows() int {
+	const overhead = 12
 	v := m.height - overhead
 	if v < 5 {
 		return 5
@@ -353,6 +376,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.petMood = pet.Nervous
 		}
 		return m, nil
+
+	case checkStartedMsg:
+		// The stream is live; begin draining it. View/mood were already set by
+		// the key handler that launched the check.
+		m.checkEvents = msg.events
+		return m, waitForCheck(msg.events)
+
+	case checkEventMsg:
+		if msg.done {
+			m.checkRunning = false
+			if prog, err := progress.Load(m.progressPath); err == nil {
+				m.prog = prog
+				m.buildTracks()
+			}
+			m.reloadState()
+			// Jerry celebrates if the exercise is now solved, otherwise commiserates.
+			m.petMood = m.petMoodForSelected()
+			if m.petMood != pet.Celebrate {
+				m.petMood = pet.Sad
+			}
+			if msg.err != nil {
+				m.statusLine = "check: not passing yet"
+			} else {
+				m.statusLine = "check complete"
+			}
+			return m, nil
+		}
+		m.checkOutput = append(m.checkOutput, msg.line)
+		const maxCheckLines = 2000
+		if len(m.checkOutput) > maxCheckLines {
+			m.checkOutput = m.checkOutput[len(m.checkOutput)-maxCheckLines:]
+		}
+		// Keep the view pinned to the tail unless the user has scrolled up.
+		if m.checkFollow {
+			if maxScroll := len(m.checkOutput) - m.visibleCheckRows(); maxScroll > 0 {
+				m.checkScroll = maxScroll
+			} else {
+				m.checkScroll = 0
+			}
+		}
+		return m, waitForCheck(m.checkEvents)
 	}
 
 	return m, nil
@@ -478,10 +542,19 @@ func (m Model) handleKeyPress(key string) (tea.Model, tea.Cmd) {
 				})
 			}
 		case "c":
+			if m.checkRunning {
+				return m, nil
+			}
+			// Build the command synchronously (exercises the command factory),
+			// then stream its output into an in-TUI pane while Jerry thinks.
 			checkCmd := m.actionCommands().Check(m.tasksDir, m.selectedEx.Metadata.Name)
-			return m, tea.ExecProcess(checkCmd, func(err error) tea.Msg {
-				return actionDoneMsg{action: "check", err: err}
-			})
+			m.view = viewCheckRun
+			m.checkRunning = true
+			m.checkOutput = nil
+			m.checkScroll = 0
+			m.checkFollow = true
+			m.petMood = pet.Thinking
+			return m, streamCheck(checkCmd)
 		case "e":
 			envCmd := m.actionCommands().Env(m.tasksDir, m.selectedEx.Metadata.Name)
 			return m, tea.ExecProcess(envCmd, func(err error) tea.Msg {
@@ -541,6 +614,45 @@ func (m Model) handleKeyPress(key string) (tea.Model, tea.Cmd) {
 		case "b", "esc", "enter":
 			m.hintScroll = 0
 			m.view = viewExerciseDetail
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		}
+
+	case viewCheckRun:
+		maxScroll := len(m.checkOutput) - m.visibleCheckRows()
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		switch key {
+		case "up", "k":
+			m.checkFollow = false
+			if m.checkScroll > 0 {
+				m.checkScroll--
+			}
+		case "down", "j":
+			if m.checkScroll < maxScroll {
+				m.checkScroll++
+			}
+			if m.checkScroll >= maxScroll {
+				m.checkFollow = true
+			}
+		case "pgup", "ctrl+u":
+			m.checkFollow = false
+			m.checkScroll -= m.visibleCheckRows() / 2
+			if m.checkScroll < 0 {
+				m.checkScroll = 0
+			}
+		case "pgdn", "ctrl+d":
+			m.checkScroll += m.visibleCheckRows() / 2
+			if m.checkScroll >= maxScroll {
+				m.checkScroll = maxScroll
+				m.checkFollow = true
+			}
+		case "b", "esc", "enter":
+			// Leave the pane; if the check is still running it keeps streaming
+			// in the background and Jerry updates when it finishes.
+			m.view = viewExerciseDetail
+			m.petMood = m.petMoodForSelected()
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		}

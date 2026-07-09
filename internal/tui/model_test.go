@@ -141,6 +141,10 @@ func TestModelDetailActionsUseCommandFactory(t *testing.T) {
 	}
 
 	for _, key := range []string{"c", "e", "k", "r", "1"} {
+		// Each action dispatches from the detail view; `c` (check) transitions to
+		// the streaming-run view, so reset before each key to isolate dispatch.
+		m.view = viewExerciseDetail
+		m.checkRunning = false
 		next, cmd := m.handleKeyPress(key)
 		if cmd == nil {
 			t.Fatalf("expected command for key %q", key)

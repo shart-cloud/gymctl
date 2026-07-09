@@ -67,6 +67,8 @@ func (m Model) View() tea.View {
 		content = m.viewHintPeek()
 	case viewStartConfirm:
 		content = m.viewStartConfirm()
+	case viewCheckRun:
+		content = m.viewCheckRun()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
@@ -417,6 +419,73 @@ func (m Model) renderPetBlock() string {
 		b.WriteString("  " + StyleDim.Render(ln) + "\n")
 	}
 	b.WriteString("  " + StyleFooter.Render("jerry · "+m.petMood.Label()))
+	return b.String()
+}
+
+// viewCheckRun renders the streaming-check pane: a live scroll of `gymctl check`
+// output with Jerry thinking beside it, then his verdict once the run finishes.
+func (m Model) viewCheckRun() string {
+	var b strings.Builder
+
+	name := ""
+	if m.selectedEx != nil {
+		name = m.selectedEx.Metadata.Name
+	}
+	title := "check · " + name
+	if m.checkRunning {
+		title = "running check · " + name
+	}
+	b.WriteString("\n")
+	b.WriteString("  " + StyleCardTitle.Render(title) + "\n")
+	if !m.checkRunning && m.statusLine != "" {
+		b.WriteString("  " + StyleDim.Render(m.statusLine) + "\n")
+	}
+	b.WriteString("\n")
+
+	// Jerry — thinking while the check runs, verdict once it lands.
+	b.WriteString(m.renderPetBlock() + "\n\n")
+
+	// Scrollable output window.
+	rows := m.visibleCheckRows()
+	total := len(m.checkOutput)
+	maxScroll := total - rows
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	start := m.checkScroll
+	if start > maxScroll {
+		start = maxScroll
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + rows
+	if end > total {
+		end = total
+	}
+
+	if total == 0 {
+		b.WriteString("  " + StyleDim.Render("waiting for output…") + "\n")
+	} else {
+		for _, ln := range m.checkOutput[start:end] {
+			b.WriteString("  " + StyleBody.Render(ln) + "\n")
+		}
+	}
+
+	// Footer.
+	b.WriteString("\n")
+	scrollHelp := StyleKey.Render("↑/↓") + StyleFooter.Render(" scroll   ")
+	if m.checkRunning {
+		b.WriteString("  " + StyleFooter.Render("running…   ") + scrollHelp +
+			StyleKey.Render("esc") + StyleFooter.Render(" back (keeps running)"))
+	} else {
+		var pos string
+		if !m.checkFollow && maxScroll > 0 {
+			pos = StyleFooter.Render(fmt.Sprintf("[%d/%d]   ", end, total))
+		}
+		b.WriteString("  " + pos + scrollHelp + StyleKey.Render("esc") + StyleFooter.Render(" back"))
+	}
+
 	return b.String()
 }
 

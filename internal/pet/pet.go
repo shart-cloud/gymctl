@@ -76,24 +76,72 @@ func MoodForTrigger(trigger string) Mood {
 // Swap this variable to replace the art wholesale.
 var Sprite = defaultSprite
 
+// defaultSprite draws Jerry as a small boxed face, ~4 lines tall. Every mood
+// shares the same head outline so he reads as one character across states; the
+// eyes, mouth, and a per-mood accent (thinking dots, nervous sweat, celebrate
+// sparkles) carry the emotion. frame animates those accents in the TUI; frame=0
+// is the resting frame used for static CLI output.
 func defaultSprite(m Mood, frame int) []string {
+	// blink returns true for a couple of frames every ~3s, but never on the
+	// resting frame so static CLI output shows open eyes.
+	blink := frame > 0 && frame%22 < 2
+
 	switch m {
 	case Thinking:
 		dots := []string{"   ", ".  ", ".. ", "..."}[(frame/2)%4]
-		return []string{"( o    o ) " + dots, " \\  ~~  / "}
-	case Nervous:
-		return []string{"( O    O )", " \\ /\\/\\ /", "   ' '   "}
-	case Happy:
-		return []string{"( ^    ^ )", " \\ \\__/ / "}
-	case Sad:
-		return []string{"( ;    ; )", " \\ /\\/\\ /"}
-	case Celebrate:
-		return []string{"\\( ^  ^ )/", "  \\ __ /   *"}
-	default: // Idle
-		if frame%22 < 2 { // eyes closed a beat every ~3s
-			return []string{"( -    - )", " \\  --  / "}
+		return []string{
+			"╭───────╮",
+			"│ o   o │ " + dots,
+			"│   ─   │",
+			"╰──┬─┬──╯",
 		}
-		return []string{"( o    o )", " \\  --  / "}
+	case Nervous:
+		sweat := " "
+		if frame/3%2 == 0 { // a bead of sweat drips on alternating beats
+			sweat = "°"
+		}
+		return []string{
+			"╭───────╮",
+			"│ ◕   ◕ │ " + sweat,
+			"│  ~~~  │",
+			"╰──┬─┬──╯",
+		}
+	case Happy:
+		return []string{
+			"╭───────╮",
+			"│ ^   ^ │",
+			"│  \\_/  │",
+			"╰──┬─┬──╯",
+		}
+	case Sad:
+		return []string{
+			"╭───────╮",
+			"│ ;   ; │",
+			"│  /¯\\  │",
+			"╰──┬─┬──╯",
+		}
+	case Celebrate:
+		spark := "  "
+		if frame/2%2 == 0 {
+			spark = "✦ "
+		}
+		return []string{
+			"╭───────╮ " + spark,
+			"│ ◠   ◠ │",
+			"│  \\▽/  │",
+			"╰──┬─┬──╯",
+		}
+	default: // Idle
+		eyes := "o   o"
+		if blink {
+			eyes = "-   -"
+		}
+		return []string{
+			"╭───────╮",
+			"│ " + eyes + " │",
+			"│   ─   │",
+			"╰──┬─┬──╯",
+		}
 	}
 }
 
