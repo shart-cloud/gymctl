@@ -1,0 +1,82 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: cks-012-pod-security-context-lockdown
+  title: "CKS-012 - Pod Security Context Lockdown"
+  track: cks
+  week: 12
+  order: 12
+
+spec:
+  difficulty: beginner
+  estimatedTime: 25m
+  points: 100
+  implementationStatus: scaffold
+
+  description: |
+    Lock down `app/backend-api`: run as UID/GID 1000, read-only root filesystem, drop all capabilities then add NET_BIND_SERVICE, disallow privilege escalation, and mount emptyDir at `/tmp`.
+
+  learningOutcomes:
+    - "Practice CKS domain: Minimize Microservice Vulnerabilities"
+    - "Apply concepts: runAsNonRoot, readOnlyRootFilesystem, capabilities, allowPrivilegeEscalation"
+    - "Validate the fix with kubectl and security-focused checks"
+
+  tags:
+    - "cks"
+    - "cks-minimize-microservice-vulnerabilities"
+    - "tier-1"
+    - "kind"
+    - "runasnonroot"
+    - "readonlyrootfilesystem"
+    - "capabilities"
+    - "allowprivilegeescalation"
+
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      provider: kind
+      createCluster: true
+      namespace: default
+
+  checks:
+    - name: "Executable lab checks implemented"
+      type: script
+      script: |
+        echo "CKS-012 is scaffolded from the CKS track specification." >&2
+        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
+        echo "Planned check criteria:" >&2
+        cat >&2 <<'CRITERIA'
+        - Pod securityContext uses UID/GID 1000 and runAsNonRoot
+        - Container readOnlyRootFilesystem=true
+        - Capabilities drop ALL and add NET_BIND_SERVICE
+        - allowPrivilegeEscalation=false
+        - emptyDir mounted at /tmp
+        - Pod Running; /etc write fails and /tmp write succeeds
+        CRITERIA
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    CKS-012 complete. You remediated the target CKS scenario and verified the controls.
+
+  tasking:
+    ticket: "CKS-012"
+    priority: "P1"
+    summary: "Pod Security Context Lockdown"
+    description: "Scaffolded CKS exercise for Minimize Microservice Vulnerabilities using kind infrastructure."
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
+    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
+    onComplete: "Security control verified. Jerry has fewer sharp objects now."

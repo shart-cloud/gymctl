@@ -1,0 +1,81 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: cks-003-ingress-tls-dashboard-lockdown
+  title: "CKS-003 - Ingress TLS Termination and Dashboard Lockdown"
+  track: cks
+  week: 12
+  order: 3
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 35m
+  points: 140
+  implementationStatus: scaffold
+
+  description: |
+    The Kubernetes Dashboard is exposed at `dashboard.lab.local` over HTTP and its service account has cluster-admin. Create the `dashboard-tls` secret, enforce HTTPS on the Ingress, remove cluster-admin, and bind the dashboard service account to a least-privilege `dashboard-viewer` ClusterRole.
+
+  learningOutcomes:
+    - "Practice CKS domain: Cluster Setup"
+    - "Apply concepts: Ingress TLS, TLS Secret, Kubernetes Dashboard RBAC"
+    - "Validate the fix with kubectl and security-focused checks"
+
+  tags:
+    - "cks"
+    - "cks-cluster-setup"
+    - "tier-2"
+    - "kind"
+    - "ingress-tls"
+    - "tls-secret"
+    - "kubernetes-dashboard-rbac"
+
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      provider: kind
+      createCluster: true
+      namespace: default
+
+  checks:
+    - name: "Executable lab checks implemented"
+      type: script
+      script: |
+        echo "CKS-003 is scaffolded from the CKS track specification." >&2
+        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
+        echo "Planned check criteria:" >&2
+        cat >&2 <<'CRITERIA'
+        - dashboard-tls secret exists with cert/key
+        - Ingress tls block references dashboard-tls for dashboard.lab.local
+        - No cluster-admin binding remains for dashboard SA
+        - dashboard-viewer ClusterRole has get/list/watch on required resources
+        - ClusterRoleBinding binds dashboard-viewer to dashboard SA
+        - Dashboard is running and accessible
+        CRITERIA
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    CKS-003 complete. You remediated the target CKS scenario and verified the controls.
+
+  tasking:
+    ticket: "CKS-003"
+    priority: "P2"
+    summary: "Ingress TLS Termination and Dashboard Lockdown"
+    description: "Scaffolded CKS exercise for Cluster Setup using kind infrastructure."
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
+    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
+    onComplete: "Security control verified. Jerry has fewer sharp objects now."

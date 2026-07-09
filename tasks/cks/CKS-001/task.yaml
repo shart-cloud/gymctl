@@ -1,0 +1,201 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: cks-001-network-policy-default-deny
+  title: "CKS-001 - Network Policy Default Deny"
+  track: cks
+  week: 12
+  order: 1
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 30m
+  points: 100
+  implementationStatus: ready
+
+  description: |
+    The `payments` namespace runs a two-tier service (`payment-api` and
+    `payment-db`) with no NetworkPolicies at all. Every pod can talk to every
+    other pod and to the internet. GRIM-9 flagged it: PCI segmentation is
+    missing.
+
+    Lock it down with a default-deny baseline plus least-privilege allow rules.
+    The cluster runs Calico, so NetworkPolicy is actually enforced — a rule that
+    is missing or wrong will really drop traffic.
+
+    Create the following NetworkPolicies in the `payments` namespace:
+
+      1. `default-deny` — selects all pods, denies all Ingress and Egress.
+      2. `allow-payment-api` — selects `app=payment-api` and allows:
+         - Ingress from pods labelled `app=frontend` in the `web` namespace, on TCP 8080
+         - Egress to `app=payment-db` on TCP 5432
+         - Egress to kube-dns (kube-system, `k8s-app=kube-dns`) on UDP and TCP 53
+      3. `allow-payment-db` — selects `app=payment-db` and allows:
+         - Ingress from `app=payment-api` on TCP 5432
+
+    When you are done, `frontend` must reach `payment-api:8080`, `payment-api`
+    must reach `payment-db:5432` (and DNS), but `payment-api` must NOT reach the
+    internet, and no other pod may reach `payment-api`.
+
+  learningOutcomes:
+    - "CKS domain: Cluster Setup — network security"
+    - "Build a default-deny Ingress/Egress baseline in a namespace"
+    - "Write least-privilege allow policies with pod and namespace selectors"
+    - "Keep DNS working under a default-deny egress posture"
+    - "Verify enforcement with real allow/deny connectivity tests"
+
+  tags:
+    - "cks"
+    - "cks-cluster-setup"
+    - "tier-1"
+    - "kind"
+    - "calico"
+    - "networkpolicy"
+    - "default-deny-ingress"
+    - "default-deny-egress"
+    - "dns-egress-allowance"
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      provider: kind
+      createCluster: true
+      namespace: payments
+      kind:
+        config: |
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          networking:
+            disableDefaultCNI: true
+            podSubnet: "192.168.0.0/16"
+    customSetup:
+      # kind ships kindnetd, which ignores NetworkPolicy. Install Calico so the
+      # policies the learner writes are actually enforced.
+      - type: script
+        timeout: 300s
+        script: |
+          set -euo pipefail
+          echo "Installing Calico (this makes NetworkPolicy enforceable)..."
+          kubectl apply --server-side --force-conflicts \
+            -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.3/manifests/calico.yaml
+          kubectl -n kube-system rollout status ds/calico-node --timeout=240s
+          kubectl -n kube-system rollout status deploy/calico-kube-controllers --timeout=240s
+      # Deploy the intentionally wide-open payments workloads.
+      - type: script
+        timeout: 180s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/namespaces.yaml
+          kubectl apply -f setup/workloads.yaml
+          kubectl -n payments rollout status deploy/payment-api --timeout=120s
+          kubectl -n payments rollout status deploy/payment-db  --timeout=120s
+          kubectl -n web      rollout status deploy/frontend    --timeout=120s
+          kubectl -n web      rollout status deploy/prober      --timeout=120s
+
+  checks:
+    - name: "default-deny NetworkPolicy exists in payments"
+      type: resourceExists
+      namespace: payments
+      resource: networkpolicy/default-deny
+
+    - name: "default-deny selects all pods and denies both directions"
+      type: script
+      script: |
+        set -euo pipefail
+        pt=$(kubectl -n payments get networkpolicy default-deny -o jsonpath='{.spec.policyTypes}')
+        echo "$pt" | grep -q Ingress || { echo "policyTypes missing Ingress"; exit 1; }
+        echo "$pt" | grep -q Egress  || { echo "policyTypes missing Egress";  exit 1; }
+        sel=$(kubectl -n payments get networkpolicy default-deny -o jsonpath='{.spec.podSelector.matchLabels}')
+        if [ -n "$sel" ]; then echo "default-deny podSelector must be empty (select all pods), got: $sel"; exit 1; fi
+        echo "default-deny is a correct namespace-wide deny"
+
+    - name: "allow-payment-api NetworkPolicy exists"
+      type: resourceExists
+      namespace: payments
+      resource: networkpolicy/allow-payment-api
+
+    - name: "allow-payment-api targets app=payment-api"
+      type: jsonpath
+      namespace: payments
+      resource: networkpolicy/allow-payment-api
+      jsonpath: "{.spec.podSelector.matchLabels.app}"
+      operator: equals
+      value: payment-api
+
+    - name: "allow-payment-db NetworkPolicy exists"
+      type: resourceExists
+      namespace: payments
+      resource: networkpolicy/allow-payment-db
+
+    - name: "frontend can reach payment-api on 8080"
+      type: script
+      script: |
+        set -euo pipefail
+        kubectl -n web exec deploy/frontend -- \
+          /agnhost connect payment-api.payments.svc.cluster.local:8080 --timeout=6s --protocol=tcp
+        echo "frontend -> payment-api:8080 OK"
+
+    - name: "payment-api can resolve DNS and reach payment-db on 5432"
+      type: script
+      script: |
+        set -euo pipefail
+        kubectl -n payments exec deploy/payment-api -- \
+          /agnhost connect payment-db.payments.svc.cluster.local:5432 --timeout=6s --protocol=tcp
+        echo "payment-api -> payment-db:5432 OK (DNS egress + db egress + db ingress all work)"
+
+    - name: "payment-api CANNOT reach the internet"
+      type: script
+      script: |
+        set -uo pipefail
+        if kubectl -n payments exec deploy/payment-api -- \
+             /agnhost connect 1.1.1.1:443 --timeout=5s --protocol=tcp >/dev/null 2>&1; then
+          echo "payment-api reached 1.1.1.1 — egress is NOT locked down"; exit 1
+        fi
+        echo "internet egress correctly blocked"
+
+    - name: "a non-frontend pod CANNOT reach payment-api"
+      type: script
+      script: |
+        set -uo pipefail
+        if kubectl -n web exec deploy/prober -- \
+             /agnhost connect payment-api.payments.svc.cluster.local:8080 --timeout=5s --protocol=tcp >/dev/null 2>&1; then
+          echo "prober reached payment-api — ingress is NOT restricted to frontend"; exit 1
+        fi
+        echo "non-frontend ingress correctly blocked"
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    CKS-001 complete. The payments namespace now has a default-deny baseline
+    with least-privilege allow rules, and enforcement is real: frontend reaches
+    the API, the API reaches the DB and DNS, but the API can't reach the
+    internet and nothing else can reach the API.
+
+    **Key takeaway:** default-deny is only safe when every required dependency
+    (DNS, the DB's *ingress* side, the frontend's ingress path) is explicitly
+    allowed. NetworkPolicy is enforced at both the egress AND ingress ends.
+
+  references:
+    - title: "Kubernetes NetworkPolicy"
+      url: "https://kubernetes.io/docs/concepts/services-networking/network-policies/"
+    - title: "Calico: enforce network policy"
+      url: "https://docs.tigera.io/calico/latest/network-policy/get-started/kubernetes-policy/"
+
+  tasking:
+    ticket: "CKS-001"
+    priority: "P1"
+    summary: "Network Policy Default Deny"
+    description: "payments namespace has no segmentation. Establish default-deny plus least-privilege allow rules with enforced NetworkPolicy."
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "Jerry left the payments namespace wide open. Every pod can phone home to the internet. Fix the segmentation before the auditors notice."
+    onCheckFail: "Still leaking. Either the deny baseline isn't there or an allow rule is wrong — check both ends of every connection."
+    onComplete: "Segmentation holds. Jerry has fewer sharp objects, and the auditors have nothing to write up."

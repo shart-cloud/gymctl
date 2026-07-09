@@ -1,0 +1,13 @@
+# Namespace-wide default deny: empty podSelector selects every pod in
+# `payments`, and listing both policyTypes with no rules drops all Ingress and
+# Egress. Everything else is layered on top with explicit allow policies.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: payments
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

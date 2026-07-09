@@ -1,0 +1,82 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: cks-013-opa-gatekeeper-policy-enforcement
+  title: "CKS-013 - OPA Gatekeeper Policy Enforcement"
+  track: cks
+  week: 12
+  order: 13
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 35m
+  points: 140
+  implementationStatus: scaffold
+
+  description: |
+    Gatekeeper is installed. Create constraints to deny privileged containers outside kube-system and require an `owner` label for pods in app/staging. Verify non-compliant pods are rejected and compliant pods succeed.
+
+  learningOutcomes:
+    - "Practice CKS domain: Minimize Microservice Vulnerabilities"
+    - "Apply concepts: OPA Gatekeeper, ConstraintTemplate, Constraint, Rego"
+    - "Validate the fix with kubectl and security-focused checks"
+
+  tags:
+    - "cks"
+    - "cks-minimize-microservice-vulnerabilities"
+    - "tier-2"
+    - "kind"
+    - "opa-gatekeeper"
+    - "constrainttemplate"
+    - "constraint"
+    - "rego"
+
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      provider: kind
+      createCluster: true
+      namespace: default
+
+  checks:
+    - name: "Executable lab checks implemented"
+      type: script
+      script: |
+        echo "CKS-013 is scaffolded from the CKS track specification." >&2
+        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
+        echo "Planned check criteria:" >&2
+        cat >&2 <<'CRITERIA'
+        - Deny privileged ConstraintTemplate exists with valid Rego
+        - Constraint excludes kube-system
+        - Required labels template supports parameterized key
+        - Constraint scopes to app and staging
+        - Privileged pod and unlabeled app pod fail
+        - Compliant pod succeeds
+        CRITERIA
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    CKS-013 complete. You remediated the target CKS scenario and verified the controls.
+
+  tasking:
+    ticket: "CKS-013"
+    priority: "P2"
+    summary: "OPA Gatekeeper Policy Enforcement"
+    description: "Scaffolded CKS exercise for Minimize Microservice Vulnerabilities using kind infrastructure."
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
+    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
+    onComplete: "Security control verified. Jerry has fewer sharp objects now."

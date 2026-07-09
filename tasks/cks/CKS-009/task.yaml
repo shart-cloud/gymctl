@@ -1,0 +1,95 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: cks-009-apparmor-profile-enforcement
+  title: "CKS-009 - AppArmor Profile Enforcement"
+  track: cks
+  week: 12
+  order: 9
+
+spec:
+  difficulty: beginner
+  estimatedTime: 25m
+  points: 100
+  implementationStatus: scaffold
+
+  description: |
+    Load `/root/profiles/k8s-restricted` on all nodes and modify `secure/data-processor` so containers run under that AppArmor profile. Verify status and that writes to `/etc/` are denied.
+
+  learningOutcomes:
+    - "Practice CKS domain: System Hardening"
+    - "Apply concepts: AppArmor profiles, pod AppArmor annotation, profile loading"
+    - "Validate the fix with kubectl and security-focused checks"
+
+  tags:
+    - "cks"
+    - "cks-system-hardening"
+    - "tier-1"
+    - "vagrant"
+    - "apparmor-profiles"
+    - "pod-apparmor-annotation"
+    - "profile-loading"
+
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      provider: vagrant
+      createCluster: true
+      namespace: default
+      vagrant:
+        bootstrapMode: managed
+        box: bento/ubuntu-22.04
+        kubernetesVersion: v1.35
+        topology:
+          controlPlanes: 1
+          workers: 2
+        network:
+          privateCidr: 192.168.56.0/24
+        resources:
+          controlPlane:
+            cpus: 2
+            memoryMb: 4096
+          worker:
+            cpus: 2
+            memoryMb: 3072
+
+  checks:
+    - name: "Executable lab checks implemented"
+      type: script
+      script: |
+        echo "CKS-009 is scaffolded from the CKS track specification." >&2
+        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
+        echo "Planned check criteria:" >&2
+        cat >&2 <<'CRITERIA'
+        - Profile k8s-restricted loaded on all nodes
+        - Deployment has correct AppArmor annotation
+        - Pod runs under the profile
+        - Write to /etc from container is denied
+        CRITERIA
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    CKS-009 complete. You remediated the target CKS scenario and verified the controls.
+
+  tasking:
+    ticket: "CKS-009"
+    priority: "P1"
+    summary: "AppArmor Profile Enforcement"
+    description: "Scaffolded CKS exercise for System Hardening using vm infrastructure."
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
+    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
+    onComplete: "Security control verified. Jerry has fewer sharp objects now."

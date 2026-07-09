@@ -1,0 +1,21 @@
+# The database's ingress side. Under default-deny, letting payment-api egress to
+# the DB is only half the path — the DB must also accept the connection.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-payment-db
+  namespace: payments
+spec:
+  podSelector:
+    matchLabels:
+      app: payment-db
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: payment-api
+      ports:
+        - protocol: TCP
+          port: 5432

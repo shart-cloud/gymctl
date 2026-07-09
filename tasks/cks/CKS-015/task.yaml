@@ -1,0 +1,96 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: cks-015-runtime-sandboxing-gvisor
+  title: "CKS-015 - Runtime Sandboxing with gVisor"
+  track: cks
+  week: 12
+  order: 15
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 35m
+  points: 140
+  implementationStatus: scaffold
+
+  description: |
+    gVisor runsc is installed on worker-1. Create RuntimeClass `gvisor`, move `sandbox/untrusted-workload` to it, and verify gVisor kernel identity differs from a standard pod.
+
+  learningOutcomes:
+    - "Practice CKS domain: Minimize Microservice Vulnerabilities"
+    - "Apply concepts: RuntimeClass, gVisor, runsc, handler configuration"
+    - "Validate the fix with kubectl and security-focused checks"
+
+  tags:
+    - "cks"
+    - "cks-minimize-microservice-vulnerabilities"
+    - "tier-2"
+    - "vagrant"
+    - "runtimeclass"
+    - "gvisor"
+    - "runsc"
+    - "handler-configuration"
+
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      provider: vagrant
+      createCluster: true
+      namespace: default
+      vagrant:
+        bootstrapMode: managed
+        box: bento/ubuntu-22.04
+        kubernetesVersion: v1.35
+        topology:
+          controlPlanes: 1
+          workers: 2
+        network:
+          privateCidr: 192.168.56.0/24
+        resources:
+          controlPlane:
+            cpus: 2
+            memoryMb: 4096
+          worker:
+            cpus: 2
+            memoryMb: 3072
+
+  checks:
+    - name: "Executable lab checks implemented"
+      type: script
+      script: |
+        echo "CKS-015 is scaffolded from the CKS track specification." >&2
+        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
+        echo "Planned check criteria:" >&2
+        cat >&2 <<'CRITERIA'
+        - RuntimeClass gvisor exists with handler runsc
+        - untrusted-workload uses runtimeClassName gvisor
+        - Pod Running
+        - dmesg shows gVisor kernel identity
+        CRITERIA
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    CKS-015 complete. You remediated the target CKS scenario and verified the controls.
+
+  tasking:
+    ticket: "CKS-015"
+    priority: "P2"
+    summary: "Runtime Sandboxing with gVisor"
+    description: "Scaffolded CKS exercise for Minimize Microservice Vulnerabilities using vm infrastructure."
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
+    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
+    onComplete: "Security control verified. Jerry has fewer sharp objects now."

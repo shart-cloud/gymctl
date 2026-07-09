@@ -1,0 +1,47 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-payment-api
+  namespace: payments
+spec:
+  podSelector:
+    matchLabels:
+      app: payment-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only app=frontend pods in the web namespace, only on 8080.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: web
+          podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # Reach the database.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: payment-db
+      ports:
+        - protocol: TCP
+          port: 5432
+    # DNS to CoreDNS in kube-system (UDP and TCP 53), or the API can't resolve
+    # payment-db by name and every other egress rule becomes useless.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

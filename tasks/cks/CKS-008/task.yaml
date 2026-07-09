@@ -1,0 +1,96 @@
+apiVersion: gym.jerry.io/v1
+kind: Exercise
+
+metadata:
+  name: cks-008-kubernetes-version-upgrade-cve-remediation
+  title: "CKS-008 - Kubernetes Version Upgrade for CVE Remediation"
+  track: cks
+  week: 12
+  order: 8
+
+spec:
+  difficulty: intermediate
+  estimatedTime: 35m
+  points: 140
+  implementationStatus: scaffold
+
+  description: |
+    Upgrade a v1.34.2 cluster to v1.34.4 for CVE remediation. Upgrade the control plane, kubelet, and kubectl; drain and upgrade worker-1; uncordon it; and verify all nodes and system pods are healthy.
+
+  learningOutcomes:
+    - "Practice CKS domain: Cluster Hardening"
+    - "Apply concepts: kubeadm upgrade, node drain, version skew policy"
+    - "Validate the fix with kubectl and security-focused checks"
+
+  tags:
+    - "cks"
+    - "cks-cluster-hardening"
+    - "tier-2"
+    - "vagrant"
+    - "kubeadm-upgrade"
+    - "node-drain"
+    - "version-skew-policy"
+
+
+  environment:
+    type: kubernetes
+    kubernetes:
+      provider: vagrant
+      createCluster: true
+      namespace: default
+      vagrant:
+        bootstrapMode: managed
+        box: bento/ubuntu-22.04
+        kubernetesVersion: v1.35
+        topology:
+          controlPlanes: 1
+          workers: 2
+        network:
+          privateCidr: 192.168.56.0/24
+        resources:
+          controlPlane:
+            cpus: 2
+            memoryMb: 4096
+          worker:
+            cpus: 2
+            memoryMb: 3072
+
+  checks:
+    - name: "Executable lab checks implemented"
+      type: script
+      script: |
+        echo "CKS-008 is scaffolded from the CKS track specification." >&2
+        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
+        echo "Planned check criteria:" >&2
+        cat >&2 <<'CRITERIA'
+        - Control plane and worker report v1.34.4
+        - kubeadm/kubelet/kubectl show v1.34.4
+        - All nodes Ready
+        - kube-system pods Running
+        - Worker drain and uncordon happened
+        CRITERIA
+        exit 1
+      expectExitCode: 0
+
+  hints:
+    - cost: 0
+      file: hints/hint-1.md
+    - cost: 25
+      file: hints/hint-2.md
+    - cost: 50
+      file: hints/hint-3.md
+
+  successMessage: |
+    CKS-008 complete. You remediated the target CKS scenario and verified the controls.
+
+  tasking:
+    ticket: "CKS-008"
+    priority: "P2"
+    summary: "Kubernetes Version Upgrade for CVE Remediation"
+    description: "Scaffolded CKS exercise for Cluster Hardening using vm infrastructure."
+    reporter: "GRIM-9"
+
+  jerryDialog:
+    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
+    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
+    onComplete: "Security control verified. Jerry has fewer sharp objects now."
