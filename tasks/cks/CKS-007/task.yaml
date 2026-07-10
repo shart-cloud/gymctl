@@ -12,65 +12,182 @@ spec:
   difficulty: intermediate
   estimatedTime: 35m
   points: 140
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Review the API server static pod manifest. Disable anonymous auth, enable NodeRestriction and PodSecurity, configure kubelet CA, require TLS 1.2+, and remove or disable insecure-port. Verify the cluster remains healthy.
+    The kube-apiserver static pod manifest on the control-plane node has been
+    handed to you for a hardening review, and it is soft in five places the
+    security team flagged:
+
+      1. **Anonymous auth is on.** `--anonymous-auth=true` lets unauthenticated
+         callers reach the API surface as `system:anonymous`.
+      2. **NodeRestriction is gone.** The admission plugin list was reduced to
+         `NamespaceLifecycle`, so a compromised kubelet could edit Node/Pod
+         objects it has no business touching.
+      3. **PodSecurity is not enabled.** Without it the built-in Pod Security
+         admission standards are not enforced.
+      4. **No kubelet CA is pinned.** `--kubelet-certificate-authority` is unset,
+         so the apiserver does not verify the kubelet's serving certificate and
+         is open to a man-in-the-middle on the apiserver→kubelet channel.
+      5. **No TLS floor.** `--tls-min-version` is unset, permitting downgrade to
+         TLS 1.0/1.1.
+
+    Harden the manifest at
+    `/etc/kubernetes/manifests/kube-apiserver.yaml` on node `cp-1`:
+
+      - `--anonymous-auth=false`
+      - `--enable-admission-plugins=NodeRestriction,PodSecurity` (both present)
+      - `--kubelet-certificate-authority=/etc/kubernetes/pki/ca.crt`
+      - `--tls-min-version=VersionTLS12`
+      - keep `--insecure-port` absent (or `0`)
+
+    …and keep the cluster healthy — `kubectl` must still work and the apiserver
+    must stay Ready.
+
+    IMPORTANT — read `solution/README.md` before you start. This gym runs on
+    **kind**, where the kube-apiserver static pod does **not** hot-reload an
+    in-place manifest edit the way a real kubeadm node does (editing the file
+    that serves the API is a chicken-and-egg the kubelet can't complete on a
+    single node — see the README). So the checks assert the **manifest content**
+    on the node, exactly as a CIS/kube-bench audit would, plus that the cluster
+    stayed reachable. On a production kubeadm node the very same edit triggers a
+    clean apiserver restart and the controls take effect at runtime.
 
   learningOutcomes:
-    - "Practice CKS domain: Cluster Hardening"
-    - "Apply concepts: API server flags, admission controllers, NodeRestriction, PodSecurity, TLS hardening"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Cluster Hardening — audit and harden the kube-apiserver flags"
+    - "Disable anonymous authentication on the API server"
+    - "Enable the NodeRestriction and PodSecurity admission plugins together"
+    - "Pin the kubelet serving CA and set a TLS floor (VersionTLS12)"
+    - "Edit a control-plane static pod manifest on the node without bricking the API"
 
   tags:
     - "cks"
     - "cks-cluster-hardening"
-    - "tier-2"
-    - "vagrant"
-    - "api-server-flags"
+    - "tier-k+n"
+    - "kind"
+    - "control-plane"
+    - "static-pod"
+    - "kube-apiserver"
     - "admission-controllers"
     - "noderestriction"
     - "podsecurity"
 
-
   environment:
     type: kubernetes
     kubernetes:
-      provider: vagrant
+      provider: kind
       createCluster: true
       namespace: default
-      vagrant:
-        bootstrapMode: managed
-        box: bento/ubuntu-22.04
-        kubernetesVersion: v1.35
-        topology:
-          controlPlanes: 1
-          workers: 2
-        network:
-          privateCidr: 192.168.56.0/24
-        resources:
-          controlPlane:
-            cpus: 2
-            memoryMb: 4096
-          worker:
-            cpus: 2
-            memoryMb: 3072
+    customSetup:
+      # Break state: rewrite the kube-apiserver manifest ON THE NODE into the
+      # insecure-but-running configuration. A .bak is left beside it. Because
+      # kind does not hot-reload the apiserver static pod (see solution/README),
+      # the RUNNING apiserver is unaffected and the cluster stays healthy — the
+      # "vulnerability" lives in the manifest the learner audits and fixes.
+      - type: nodeExec
+        timeout: 120s
+        nodeExec:
+          node: cp-1
+          script: |
+            set -e
+            m=/etc/kubernetes/manifests/kube-apiserver.yaml
+            cp "$m" "${m}.bak"
+            grep -q -- '--anonymous-auth=' "$m" || sed -i 's#^\(    - kube-apiserver\)$#\1\n    - --anonymous-auth=true#' "$m"
+            sed -i 's#--anonymous-auth=false#--anonymous-auth=true#' "$m"
+            sed -i 's#--enable-admission-plugins=.*#--enable-admission-plugins=NamespaceLifecycle#' "$m"
+            sed -i '/--kubelet-certificate-authority=/d' "$m"
+            sed -i '/--tls-min-version=/d' "$m"
+            grep -q -- '--anonymous-auth=true' "$m"
+            grep -q -- '--enable-admission-plugins=NamespaceLifecycle' "$m"
+      # Confirm the cluster is reachable after the break (it should be untouched).
+      - type: script
+        timeout: 120s
+        script: |
+          set -e
+          for i in $(seq 1 40); do
+            ok=$(kubectl get --raw='/livez' 2>/dev/null || true)
+            if [ "$ok" = "ok" ] && kubectl get nodes >/dev/null 2>&1; then
+              echo "cluster reachable; insecure manifest staged on cp-1"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "cluster did not become reachable after staging the broken manifest" >&2
+          exit 1
 
   checks:
-    - name: "Executable lab checks implemented"
+    # ---------- Hardened flags: assert manifest content on the node ----------
+    - name: "anonymous-auth is disabled (--anonymous-auth=false)"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        f=/etc/kubernetes/manifests/kube-apiserver.yaml
+        grep -qE -- '--anonymous-auth=false' "$f"
+        ! grep -qE -- '--anonymous-auth=true' "$f"
+      expectExitCode: 0
+
+    - name: "admission plugins include NodeRestriction"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        f=/etc/kubernetes/manifests/kube-apiserver.yaml
+        grep -E -- '--enable-admission-plugins=' "$f" | grep -q NodeRestriction
+      expectExitCode: 0
+
+    - name: "admission plugins include PodSecurity"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        f=/etc/kubernetes/manifests/kube-apiserver.yaml
+        grep -E -- '--enable-admission-plugins=' "$f" | grep -q PodSecurity
+      expectExitCode: 0
+
+    - name: "kubelet-certificate-authority points at the cluster CA"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        f=/etc/kubernetes/manifests/kube-apiserver.yaml
+        grep -qE -- '--kubelet-certificate-authority=/etc/kubernetes/pki/ca\.crt' "$f"
+      expectExitCode: 0
+
+    - name: "TLS floor is set to VersionTLS12"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        f=/etc/kubernetes/manifests/kube-apiserver.yaml
+        grep -qE -- '--tls-min-version=VersionTLS12' "$f"
+      expectExitCode: 0
+
+    # ---------- insecure-port: structural (removed since k8s v1.20) ----------
+    - name: "insecure-port is absent or 0"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        f=/etc/kubernetes/manifests/kube-apiserver.yaml
+        line=$(grep -E -- '--insecure-port=' "$f" || true)
+        [ -z "$line" ] || echo "$line" | grep -q -- '=0'
+      expectExitCode: 0
+
+    # ---------- Positive: the cluster is still healthy ----------
+    - name: "HEALTHY: apiserver Ready and kubectl works"
       type: script
       script: |
-        echo "CKS-007 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - anonymous-auth=false
-        - enable-admission-plugins includes NodeRestriction and PodSecurity
-        - kubelet-certificate-authority points to CA
-        - tls-min-version=VersionTLS12
-        - insecure-port absent or 0
-        - API server is running and kubectl works
-        CRITERIA
+        set -e
+        for i in $(seq 1 40); do
+          ok=$(kubectl get --raw='/livez' 2>/dev/null || true)
+          if [ "$ok" = "ok" ] && kubectl get nodes >/dev/null 2>&1; then
+            echo "apiserver /livez=ok and kubectl get nodes works"
+            exit 0
+          fi
+          sleep 3
+        done
+        echo "apiserver did not become healthy within timeout" >&2
         exit 1
       expectExitCode: 0
 
@@ -83,9 +200,27 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-007 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-007 complete. The kube-apiserver manifest on cp-1 now disables anonymous
+    auth, enables NodeRestriction + PodSecurity, pins the kubelet CA, and sets a
+    TLS 1.2 floor — and the cluster stayed reachable throughout.
+
+    **Key takeaway:** the kube-apiserver is a static pod; its knobs are flags in
+    `/etc/kubernetes/manifests/kube-apiserver.yaml` on the control-plane node,
+    not an API object you `kubectl edit`. Always back the file up first — a bad
+    edit restarts the apiserver and can lock you out. On kind the running
+    apiserver does not hot-reload the edit (see solution/README), so we audit the
+    manifest; on a real kubeadm node the same edit restarts the apiserver and the
+    controls take effect immediately.
+
+  references:
+    - title: "kube-apiserver flags reference"
+      url: "https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/"
+    - title: "Using Admission Controllers (NodeRestriction, PodSecurity)"
+      url: "https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/"
+    - title: "Securing a Cluster"
+      url: "https://kubernetes.io/docs/tasks/administer-cluster/securing-a-cluster/"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry left the apiserver wide open: anonymous auth on, NodeRestriction stripped, no TLS floor. It's a static pod on the node — harden the manifest, don't brick the API."
+    onCheckFail: "Still soft. Every flag lives on its own line in /etc/kubernetes/manifests/kube-apiserver.yaml on cp-1 — check anonymous-auth, both admission plugins, the kubelet CA, and the TLS floor."
+    onComplete: "Locked down. Anonymous is out, NodeRestriction and PodSecurity are in, the kubelet CA is pinned, and TLS won't drop below 1.2 — with the cluster still up."

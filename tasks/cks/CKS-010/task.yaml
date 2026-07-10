@@ -10,67 +10,177 @@ metadata:
 
 spec:
   difficulty: intermediate
-  estimatedTime: 35m
+  estimatedTime: 30m
   points: 140
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Move `public/web-frontend` to RuntimeDefault seccomp and `monitoring/log-writer` to the Localhost profile at `profiles/audit-write-only.json`. Verify pods run and blocked syscalls fail.
+    Two workloads run with seccomp explicitly turned OFF
+    (`securityContext.seccompProfile.type: Unconfined`) — the kernel applies no
+    syscall filter, so every syscall, including dangerous ones like
+    `unshare(CLONE_NEWUSER)`, is allowed. Harden both without breaking them:
+
+      - `public/web-frontend` → **RuntimeDefault**. The runtime's built-in
+        profile; no node file needed. It blocks a curated set of dangerous
+        syscalls while allowing what normal apps use.
+      - `monitoring/log-writer` → **Localhost**, referencing the profile
+        `profiles/audit-write-only.json`. `localhostProfile` is resolved
+        relative to the kubelet seccomp root `/var/lib/kubelet/seccomp/`, so it
+        points at `/var/lib/kubelet/seccomp/profiles/audit-write-only.json`.
+
+    That profile file is already on the node (the exercise setup placed it — a
+    pod that references a *missing* Localhost profile fails to start). Set the
+    profile at the **pod level**
+    (`.spec.template.spec.securityContext.seccompProfile`) on each Deployment.
+
+    Both Deployments must stay Running, and — the real test — the dangerous
+    syscall must actually be blocked: under RuntimeDefault,
+    `unshare --map-root-user --user true` in web-frontend returns
+    `Operation not permitted`. On the broken (Unconfined) state it succeeds.
 
   learningOutcomes:
-    - "Practice CKS domain: System Hardening"
-    - "Apply concepts: seccomp, RuntimeDefault, Localhost profiles, securityContext"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: System Hardening — confine container syscalls with seccomp"
+    - "Apply a RuntimeDefault seccomp profile via pod securityContext"
+    - "Apply a Localhost seccomp profile and understand where localhostProfile resolves on the node"
+    - "Verify REAL enforcement: a blocked syscall (unshare) fails under RuntimeDefault but succeeds under Unconfined"
+    - "Understand why Unconfined hands an attacker the full syscall surface"
 
   tags:
     - "cks"
     - "cks-system-hardening"
     - "tier-2"
-    - "vagrant"
+    - "kind"
     - "seccomp"
     - "runtimedefault"
     - "localhost-profiles"
     - "securitycontext"
 
-
   environment:
     type: kubernetes
     kubernetes:
-      provider: vagrant
+      provider: kind
       createCluster: true
-      namespace: default
-      vagrant:
-        bootstrapMode: managed
-        box: bento/ubuntu-22.04
-        kubernetesVersion: v1.35
-        topology:
-          controlPlanes: 1
-          workers: 2
-        network:
-          privateCidr: 192.168.56.0/24
-        resources:
-          controlPlane:
-            cpus: 2
-            memoryMb: 4096
-          worker:
-            cpus: 2
-            memoryMb: 3072
+      namespace: public
+    customSetup:
+      # Place the Localhost seccomp profile on the node FIRST. The kubelet
+      # seccomp root is /var/lib/kubelet/seccomp; a localhostProfile of
+      # `profiles/audit-write-only.json` resolves under it. SCMP_ACT_LOG is an
+      # audit action — allows every syscall but logs it — so log-writer stays
+      # Running once it references this file. kind recreates the node FS on every
+      # start, so this runs each time. No heredoc: printf a single-line JSON.
+      - type: nodeExec
+        timeout: 60s
+        nodeExec:
+          node: cp-1
+          script: |
+            set -e
+            mkdir -p /var/lib/kubelet/seccomp/profiles
+            printf '%s' '{"defaultAction":"SCMP_ACT_LOG"}' > /var/lib/kubelet/seccomp/profiles/audit-write-only.json
+            echo "placed profile at /var/lib/kubelet/seccomp/profiles/audit-write-only.json:"
+            cat /var/lib/kubelet/seccomp/profiles/audit-write-only.json
+      # Create the namespaces and deploy both workloads in the broken
+      # (Unconfined) state, then wait for them to be Available.
+      - type: script
+        timeout: 180s
+        script: |
+          set -euo pipefail
+          kubectl apply -f setup/namespaces.yaml
+          kubectl apply -f setup/workloads.yaml
+          kubectl -n public     rollout status deploy/web-frontend --timeout=120s
+          kubectl -n monitoring rollout status deploy/log-writer   --timeout=120s
+          echo "Broken state ready: both workloads Unconfined (no syscall filter)."
 
   checks:
-    - name: "Executable lab checks implemented"
+    # ---------- Structural: the profiles are set correctly ----------
+    - name: "web-frontend uses RuntimeDefault seccomp"
+      type: jsonpath
+      namespace: public
+      resource: deployment/web-frontend
+      jsonpath: "{.spec.template.spec.securityContext.seccompProfile.type}"
+      operator: equals
+      value: RuntimeDefault
+
+    - name: "log-writer uses a Localhost seccomp profile"
+      type: jsonpath
+      namespace: monitoring
+      resource: deployment/log-writer
+      jsonpath: "{.spec.template.spec.securityContext.seccompProfile.type}"
+      operator: equals
+      value: Localhost
+
+    - name: "log-writer references profiles/audit-write-only.json"
+      type: jsonpath
+      namespace: monitoring
+      resource: deployment/log-writer
+      jsonpath: "{.spec.template.spec.securityContext.seccompProfile.localhostProfile}"
+      operator: equals
+      value: profiles/audit-write-only.json
+
+    # ---------- Setup invariant: the node-side profile file is present ----------
+    - name: "Localhost profile file exists on the node"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        f=/var/lib/kubelet/seccomp/profiles/audit-write-only.json
+        test -f "$f" || { echo "missing $f"; exit 1; }
+        grep -q SCMP_ACT_LOG "$f" || { echo "$f is not the audit profile"; exit 1; }
+        echo "node has $f"
+
+    # ---------- Positive: both workloads still run ----------
+    - name: "web-frontend Deployment is Available"
+      type: condition
+      namespace: public
+      resource: deployment/web-frontend
+      condition: Available
+      status: "True"
+
+    - name: "log-writer Deployment is Available"
+      type: condition
+      namespace: monitoring
+      resource: deployment/log-writer
+      condition: Available
+      status: "True"
+
+    - name: "POSITIVE: benign syscalls still work in web-frontend"
       type: script
       script: |
-        echo "CKS-010 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - web-frontend uses RuntimeDefault seccomp
-        - log-writer uses Localhost profile with correct path
-        - Both deployments have running pods
-        - unshare is blocked in web-frontend
-        CRITERIA
-        exit 1
-      expectExitCode: 0
+        set -uo pipefail
+        # Gate on a completed rollout so we exec the CURRENT pod, not a
+        # terminating old one (a Terminating pod still reports phase=Running).
+        kubectl -n public rollout status deploy/web-frontend --timeout=120s >/dev/null 2>&1 || true
+        for i in $(seq 1 30); do
+          out=$(kubectl -n public exec deploy/web-frontend -- sh -c 'id -u && echo probe_ok' 2>&1)
+          rc=$?
+          if [ "$rc" -eq 0 ] && echo "$out" | grep -q probe_ok; then
+            echo "benign commands run fine under RuntimeDefault: $out"; exit 0
+          fi
+          sleep 2
+        done
+        echo "web-frontend could not run a benign command: $out"; exit 1
+
+    # ---------- Negative (the crux): the dangerous syscall is BLOCKED ----------
+    - name: "ENFORCED: unshare is blocked in web-frontend (RuntimeDefault)"
+      type: script
+      script: |
+        set -uo pipefail
+        # Gate on a completed rollout so we exec the CURRENT pod, not a
+        # terminating old one — a Terminating pod still reports phase=Running,
+        # and on the broken->fixed transition the old pod is still Unconfined.
+        kubectl -n public rollout status deploy/web-frontend --timeout=120s >/dev/null 2>&1 || true
+        rc=1; out=""
+        for i in $(seq 1 30); do
+          # Under RuntimeDefault, unshare(CLONE_NEWUSER) must return EPERM.
+          out=$(kubectl -n public exec deploy/web-frontend -- unshare --map-root-user --user true 2>&1)
+          rc=$?
+          [ "$rc" -ne 0 ] && break
+          sleep 2
+        done
+        if [ "$rc" -eq 0 ]; then
+          echo "unshare SUCCEEDED (rc=0) — seccomp is NOT confining this pod (still Unconfined?)"; exit 1
+        fi
+        echo "$out" | grep -qi "not permitted" || echo "note: unshare failed (rc=$rc) with: $out"
+        echo "unshare correctly blocked by seccomp (rc=$rc): $out"
 
   hints:
     - cost: 0
@@ -81,9 +191,27 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-010 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-010 complete. web-frontend now runs under RuntimeDefault (the runtime's
+    built-in profile — no node file needed) and log-writer under a Localhost
+    profile at /var/lib/kubelet/seccomp/profiles/audit-write-only.json. Both are
+    still Running, and `unshare --map-root-user --user true` now returns
+    "Operation not permitted" in web-frontend.
+
+    **Key takeaway:** seccomp is enforced by the container runtime, so it really
+    bites on kind. RuntimeDefault is the zero-effort right default and blocks the
+    dangerous syscalls; Localhost points at a profile FILE that must exist on the
+    node under /var/lib/kubelet/seccomp/ before the pod starts. Unconfined turns
+    the filter off entirely — never ship it.
+
+  references:
+    - title: "Restrict a Container's Syscalls with seccomp"
+      url: "https://kubernetes.io/docs/tutorials/security/seccomp/"
+    - title: "Configure a Security Context — seccompProfile"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
+    - title: "Seccomp security profiles for Docker (the RuntimeDefault profile)"
+      url: "https://docs.docker.com/engine/security/seccomp/"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Jerry set both workloads to Unconfined seccomp — every syscall wide open. A popped container can just unshare itself a new namespace and start climbing. Put a filter back on."
+    onCheckFail: "Not confined yet, or you confined it so hard it won't start. web-frontend wants RuntimeDefault, log-writer wants the Localhost profile that's already on the node — and unshare has to actually fail."
+    onComplete: "Filters are on. web-frontend can't unshare its way out anymore, log-writer is under the audit profile, and both are still Running."

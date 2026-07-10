@@ -12,61 +12,185 @@ spec:
   difficulty: beginner
   estimatedTime: 25m
   points: 100
-  implementationStatus: scaffold
+  implementationStatus: ready
 
   description: |
-    Verify `/usr/bin/kubelet` and `/usr/bin/kubectl` against `/root/checksums/SHA512SUMS`. Write `/root/binary-verification.txt` with computed and expected hashes, replace any tampered binary from the official Kubernetes release, and restart affected services.
+    A supply-chain alert fired on the control-plane node `cp-1`: one of the
+    Kubernetes binaries under `/usr/bin` no longer matches its published
+    checksum. You have a trusted reference at `/root/checksums/SHA512SUMS`
+    (generated from a known-good copy of this node's binaries) and you must
+    find the tampered binary, restore it, and prove the node is healthy again.
+
+    Work entirely on node `cp-1` (the kind control-plane container — reach it
+    with `docker exec -it jerry-gym-control-plane bash`).
+
+    Do all of the following:
+
+      1. **Compute** the SHA-512 of `/usr/bin/kubelet` and `/usr/bin/kubectl`
+         (`sha512sum <path>`).
+      2. **Compare** each against its entry in `/root/checksums/SHA512SUMS`.
+         Exactly one binary has been tampered (bytes appended); the other still
+         matches.
+      3. **Write a verification report** to `/root/binary-verification.txt` with
+         one line per binary, in this EXACT format (the checks grep for it):
+
+             kubelet: expected=<sha512> computed=<sha512> status=OK
+             kubectl: expected=<sha512> computed=<sha512> status=OK
+
+         `expected` is the hash from `SHA512SUMS`, `computed` is what you got
+         from `sha512sum`, and `status` is `OK` when they match or `MISMATCH`
+         when they differ. Before you remediate, the tampered binary's line will
+         read `status=MISMATCH`; after you restore it, regenerate the report so
+         **both** lines read `status=OK` with `expected` == `computed`.
+      4. **Restore** the tampered binary to a known-good copy. A pristine copy of
+         each binary was stashed at `/root/pristine/` before the tamper — restore
+         from there. (On a real node you would instead re-download the matching
+         release from `dl.k8s.io` and verify it against the published hashes;
+         see `solution/README.md`.)
+      5. **Restart the affected service** (`systemctl restart kubelet`) so it
+         runs the restored binary, and confirm the node returns to `Ready`.
+
+    The final `/root/binary-verification.txt` must show both binaries `OK`, the
+    live binaries on disk must match `SHA512SUMS`, kubelet must be `active`, and
+    the node must be `Ready`.
 
   learningOutcomes:
-    - "Practice CKS domain: Cluster Setup"
-    - "Apply concepts: SHA-512 checksums, binary verification, tamper detection"
-    - "Validate the fix with kubectl and security-focused checks"
+    - "CKS domain: Cluster Setup — verify the integrity of cluster binaries"
+    - "Compute and compare SHA-512 checksums against a trusted reference"
+    - "Detect which of several binaries has been tampered (byte-level drift)"
+    - "Restore a tampered binary and restart the affected node service safely"
+    - "Confirm node health after a control-plane binary swap"
 
   tags:
     - "cks"
     - "cks-cluster-setup"
-    - "tier-1"
-    - "vagrant"
+    - "tier-k+n"
+    - "kind"
+    - "control-plane"
+    - "supply-chain"
     - "sha-512-checksums"
     - "binary-verification"
     - "tamper-detection"
 
-
   environment:
     type: kubernetes
     kubernetes:
-      provider: vagrant
+      provider: kind
       createCluster: true
       namespace: default
-      vagrant:
-        bootstrapMode: managed
-        box: bento/ubuntu-22.04
-        kubernetesVersion: v1.35
-        topology:
-          controlPlanes: 1
-          workers: 2
-        network:
-          privateCidr: 192.168.56.0/24
-        resources:
-          controlPlane:
-            cpus: 2
-            memoryMb: 4096
-          worker:
-            cpus: 2
-            memoryMb: 3072
+    customSetup:
+      # Break state: on cp-1, stash pristine copies of kubelet+kubectl, generate
+      # a reference SHA512SUMS from those (still-untouched) live binaries, then
+      # TAMPER kubelet by appending bytes. Writing an executing binary returns
+      # ETXTBSY, so we stop kubelet, append, and start it again. The ELF loader
+      # ignores trailing bytes, so kubelet still runs on the tampered file — this
+      # exercise is about INTEGRITY drift, not a crashed kubelet. kubectl is left
+      # pristine so the learner must identify WHICH binary drifted.
+      - type: nodeExec
+        timeout: 180s
+        nodeExec:
+          node: cp-1
+          script: |
+            set -e
+            mkdir -p /root/pristine /root/checksums
+            cp -f /usr/bin/kubelet /root/pristine/kubelet
+            cp -f /usr/bin/kubectl /root/pristine/kubectl
+            sha512sum /usr/bin/kubelet /usr/bin/kubectl > /root/checksums/SHA512SUMS
+            systemctl stop kubelet
+            printf '\n### tampered-by-jerry (integrity drift) ###\n' >> /usr/bin/kubelet
+            systemctl start kubelet
+            for i in $(seq 1 30); do
+              [ "$(systemctl is-active kubelet)" = active ] && break
+              sleep 1
+            done
+            [ "$(systemctl is-active kubelet)" = active ]
+            want=$(grep ' /usr/bin/kubelet$' /root/checksums/SHA512SUMS | awk '{print $1}')
+            got=$(sha512sum /usr/bin/kubelet | awk '{print $1}')
+            [ "$want" != "$got" ]
+            echo "staged: kubelet tampered (hash drift) but running; kubectl pristine; reference at /root/checksums/SHA512SUMS"
+      # Confirm the node recovers to Ready after the kubelet restart.
+      - type: script
+        timeout: 180s
+        script: |
+          set -e
+          for i in $(seq 1 60); do
+            st=$(kubectl get nodes --no-headers 2>/dev/null | awk '{print $2}' | head -n1)
+            if [ "$st" = "Ready" ]; then
+              echo "node Ready; tampered kubelet running, reference staged on cp-1"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "node did not return to Ready after staging the tamper" >&2
+          exit 1
 
   checks:
-    - name: "Executable lab checks implemented"
+    # ---------- The verification report exists and is internally consistent ----
+    - name: "binary-verification.txt reports both binaries OK (expected==computed)"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        f=/root/binary-verification.txt
+        test -f "$f"
+        ! grep -q 'status=MISMATCH' "$f"
+        for b in kubelet kubectl; do
+          line=$(grep "^$b:" "$f")
+          echo "$line" | grep -q 'status=OK'
+          exp=$(echo "$line" | sed -n 's/.*expected=\([0-9a-f]*\).*/\1/p')
+          got=$(echo "$line" | sed -n 's/.*computed=\([0-9a-f]*\).*/\1/p')
+          [ -n "$exp" ] && [ "$exp" = "$got" ]
+        done
+      expectExitCode: 0
+
+    # ---------- REAL integrity gate: live binary hash == reference ------------
+    # Recomputes on the node and compares to SHA512SUMS. Passes only after a
+    # genuine restore — editing the report alone can never satisfy this.
+    - name: "INTEGRITY: live /usr/bin/kubelet matches SHA512SUMS"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        ref=/root/checksums/SHA512SUMS
+        want=$(grep ' /usr/bin/kubelet$' "$ref" | awk '{print $1}')
+        got=$(sha512sum /usr/bin/kubelet | awk '{print $1}')
+        [ -n "$want" ] && [ "$want" = "$got" ]
+      expectExitCode: 0
+
+    - name: "INTEGRITY: live /usr/bin/kubectl matches SHA512SUMS"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        ref=/root/checksums/SHA512SUMS
+        want=$(grep ' /usr/bin/kubectl$' "$ref" | awk '{print $1}')
+        got=$(sha512sum /usr/bin/kubectl | awk '{print $1}')
+        [ -n "$want" ] && [ "$want" = "$got" ]
+      expectExitCode: 0
+
+    # ---------- Affected service is running ----------------------------------
+    - name: "kubelet service is active"
+      type: nodeExec
+      node: cp-1
+      script: |
+        set -e
+        [ "$(systemctl is-active kubelet)" = "active" ]
+      expectExitCode: 0
+
+    # ---------- Positive: the node is healthy after the restore --------------
+    - name: "HEALTHY: node is Ready"
       type: script
       script: |
-        echo "CKS-004 is scaffolded from the CKS track specification." >&2
-        echo "Implement setup manifests/scripts and executable checks before enabling completion." >&2
-        echo "Planned check criteria:" >&2
-        cat >&2 <<'CRITERIA'
-        - binary-verification.txt exists with required fields
-        - kubelet and kubectl match official checksums or have been replaced
-        - Kubelet is running if replaced
-        CRITERIA
+        set -e
+        for i in $(seq 1 40); do
+          st=$(kubectl get nodes --no-headers 2>/dev/null | awk '{print $2}' | head -n1)
+          if [ "$st" = "Ready" ]; then
+            echo "node Ready after binary restore"
+            exit 0
+          fi
+          sleep 3
+        done
+        echo "node did not become Ready within timeout" >&2
         exit 1
       expectExitCode: 0
 
@@ -79,9 +203,27 @@ spec:
       file: hints/hint-3.md
 
   successMessage: |
-    CKS-004 complete. You remediated the target CKS scenario and verified the controls.
+    CKS-004 complete. You identified the tampered binary (kubelet had bytes
+    appended), restored it from a known-good copy, restarted kubelet, and the
+    live binaries now match /root/checksums/SHA512SUMS with the node Ready.
+
+    **Key takeaway:** integrity verification is byte-exact. A single appended
+    byte changes the SHA-512 even when the ELF still runs — so "it still works"
+    is NOT evidence a binary is trustworthy. Keep a trusted reference of hashes,
+    compare against it, and restore from a verified source (re-download from
+    dl.k8s.io and check the published hashes) rather than trusting the on-disk
+    file. Always back up before you swap a control-plane binary, and restart the
+    affected service so it actually execs the restored file.
+
+  references:
+    - title: "Verifying binary integrity (sha512sum)"
+      url: "https://kubernetes.io/docs/tasks/tools/"
+    - title: "Downloading and verifying kubectl"
+      url: "https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/"
+    - title: "CKS: Supply Chain Security"
+      url: "https://kubernetes.io/docs/concepts/security/"
 
   jerryDialog:
-    onStart: "Jerry left a CKS-shaped security incident here. The exam prompt is clean; the mess is not."
-    onCheckFail: "The scaffold is loaded, but the executable lab still needs real setup and checks."
-    onComplete: "Security control verified. Jerry has fewer sharp objects now."
+    onStart: "Supply-chain alarm on cp-1: a binary under /usr/bin drifted from its checksum. One of kubelet/kubectl was tampered. Find it, restore it, prove the node is Ready."
+    onCheckFail: "Not verified yet. Compute sha512sum for BOTH binaries, compare to /root/checksums/SHA512SUMS, write /root/binary-verification.txt in the required format, restore the bad one from /root/pristine, and restart kubelet."
+    onComplete: "Integrity restored. The tampered kubelet is back to a known-good copy, the report reads OK/OK, and the node is Ready. Jerry's appended bytes are gone."

@@ -1,0 +1,38 @@
+# log-writer hardened onto a Localhost seccomp profile.
+#
+# Localhost means "use a profile file that lives on the node, under the kubelet
+# seccomp root (/var/lib/kubelet/seccomp)". The localhostProfile path is
+# resolved RELATIVE to that root, so:
+#
+#     localhostProfile: profiles/audit-write-only.json
+#       -> /var/lib/kubelet/seccomp/profiles/audit-write-only.json
+#
+# That file (an audit/log-only profile: defaultAction SCMP_ACT_LOG) is placed on
+# the node by the exercise setup. A pod that references a Localhost profile which
+# does NOT exist on its node fails to start (CreateContainerError), which is why
+# the file must be present before this Deployment rolls out.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-writer
+  namespace: monitoring
+  labels:
+    app: log-writer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-writer
+  template:
+    metadata:
+      labels:
+        app: log-writer
+    spec:
+      securityContext:
+        seccompProfile:
+          type: Localhost
+          localhostProfile: profiles/audit-write-only.json
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do sleep 3600; done"]
