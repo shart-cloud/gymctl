@@ -80,13 +80,16 @@ func buildVagrantfile(spec *scenario.KubernetesSpec, machines []vagrantMachine, 
 
 		b.WriteString(fmt.Sprintf("    node.vm.provision \"shell\", inline: %q\n", "set -e; sudo mkdir -p /etc/jerry-gym; echo role="+m.Role+" | sudo tee /etc/jerry-gym/role >/dev/null"))
 
-		if bp.BootstrapMode == VagrantBootstrapManaged {
+		// Bootstrap provisioners by mode:
+		//   managed  — install containerd + k8s, then kubeadm init/join
+		//   prebaked — box already has them baked; skip preinstall, just bootstrap
+		//   barenode — no provisioners; the learner bootstraps the cluster
+		switch bp.BootstrapMode {
+		case VagrantBootstrapManaged:
 			writePreinstallProvisioner(&b, bp)
-			if m.Role == "control-plane" {
-				writeControlPlaneProvisioner(&b, m, bp, backend)
-			} else if m.Role == "worker" {
-				writeWorkerJoinProvisioner(&b)
-			}
+			writeRoleBootstrapProvisioner(&b, m, bp, backend)
+		case VagrantBootstrapPrebaked:
+			writeRoleBootstrapProvisioner(&b, m, bp, backend)
 		}
 
 		b.WriteString("  end\n\n")
@@ -94,6 +97,16 @@ func buildVagrantfile(spec *scenario.KubernetesSpec, machines []vagrantMachine, 
 
 	b.WriteString("end\n")
 	return b.String()
+}
+
+// writeRoleBootstrapProvisioner runs the kubeadm init (control-plane) or join
+// (worker) provisioner. Shared by the managed and prebaked bootstrap modes.
+func writeRoleBootstrapProvisioner(b *strings.Builder, m vagrantMachine, bp bootstrapParams, backend VagrantBackend) {
+	if m.Role == "control-plane" {
+		writeControlPlaneProvisioner(b, m, bp, backend)
+	} else if m.Role == "worker" {
+		writeWorkerJoinProvisioner(b)
+	}
 }
 
 func writeProviderBlock(b *strings.Builder, m vagrantMachine, backend VagrantBackend) {
@@ -163,6 +176,12 @@ func writeLibvirtBlock(b *strings.Builder, m vagrantMachine) {
 		b.WriteString(fmt.Sprintf("      lv.memory = %d\n", m.MemoryMB))
 	}
 	b.WriteString("      lv.driver = \"kvm\"\n")
+	// Detect the guest IP via the QEMU guest agent instead of the DHCP lease
+	// table. The lease-table poll (`domain.wait_for(2)`) is only 2s and is
+	// unreliable on some hosts (e.g. WSL2), causing "wait_for timeout (2
+	// seconds)" on boot. The agent path uses the boot_timeout instead. The box
+	// must ship qemu-guest-agent (the Packer image does).
+	b.WriteString("      lv.qemu_use_agent = true\n")
 	b.WriteString("    end\n")
 }
 

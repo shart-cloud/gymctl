@@ -1,0 +1,32 @@
+#cloud-config
+# NoCloud seed for the gymctl Packer build VM.
+# Provisions the `vagrant` user with passwordless sudo + the well-known
+# Vagrant insecure SSH public key so Packer (and later `vagrant up`) can log in.
+hostname: gymctl-builder
+manage_etc_hosts: true
+
+users:
+  - name: vagrant
+    gecos: Vagrant
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: false
+    # password is "vagrant" (fallback only; key auth is primary)
+    passwd: "$6$rounds=4096$8dkK1P/oE$2DGBDzC4gBRDPq6PfoJfRNMSpd7SmXNIofXhFtb2GDdyfbeM0J1Ozjb.SBLm2C2qLBHfTZ3S/0/8B2E3aQ.KH1"
+    ssh_authorized_keys:
+      - "ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA6NF8iallvQVp22WDkTkyrtvp9eWW6A8YVr+kz4TjGYe7gHzIw+niNltGEFHzD8+v1I2YJ6oXevct1YeS0o9HZyN1Q9qgCgzUFtdOKLv6IedplqoPkcmF0aYet2PkEDo3MlTBckFXPITAMzF8dJSIFo9D8HfdOV0IAdx4O7PtixWKn5y2hMNG0zQPyUecp4pzC6kivAIhyfHilFR61RGL+GPXQ2MWZWFYbAGjyiYJnAmCP3NOTd0jMZEnDkbUvxhMmBYSdETk1rRgm+R4LOzFUGaHqHDLKLX+FIPKcF96hrucXzcWyLbIbEgE98OHlnVYCzRdK8jlqm8tehUc9c9WhQ== vagrant insecure public key"
+
+ssh_pwauth: true
+disable_root: false
+
+# Grow the root filesystem to fill the resized (20G) disk so there is room
+# for containerd, the kube packages and the pre-pulled control-plane images.
+growpart:
+  mode: auto
+  devices: ["/"]
+resize_rootfs: true
+
+# Keep first boot lean; the heavy lifting is done by Packer shell provisioners.
+package_update: false
+package_upgrade: false

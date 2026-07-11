@@ -67,6 +67,54 @@ func TestBuildVagrantfile_ManagedMode(t *testing.T) {
 	}
 }
 
+func TestBuildVagrantfile_PrebakedMode(t *testing.T) {
+	trueVal := true
+	spec := &scenario.KubernetesSpec{
+		CreateCluster: &trueVal,
+		Provider:      "vagrant",
+		Vagrant: &scenario.VagrantProviderSpec{
+			BootstrapMode: "prebaked",
+			Box:           "gymctl/ubuntu2204-k8s",
+			Topology:      scenario.VagrantTopologySpec{ControlPlanes: 1, Workers: 1},
+			Network:       scenario.VagrantNetworkSpec{PrivateCIDR: "192.168.56.0/24"},
+		},
+	}
+	machines := buildVagrantMachines("test-prebaked", spec)
+	vf := buildVagrantfile(spec, machines, BackendLibvirt)
+
+	// Prebaked skips the slow preinstall (containerd/k8s already in the box)...
+	if strings.Contains(vf, "k8s-preinstall") {
+		t.Error("prebaked Vagrantfile should NOT contain the preinstall provisioner")
+	}
+	if strings.Contains(vf, "apt-get install -y containerd.io") {
+		t.Error("prebaked Vagrantfile should NOT re-install containerd")
+	}
+	// ...but still bootstraps the cluster with kubeadm.
+	mustContain := []string{
+		"gymctl/ubuntu2204-k8s",
+		"k8s-control-plane-init",
+		"k8s-worker-join",
+		"kubeadm init",
+		"join-command.sh",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(vf, want) {
+			t.Errorf("prebaked Vagrantfile missing %q", want)
+		}
+	}
+
+	cpSection := extractNodeSection(vf, "test-prebaked-cp-1")
+	if cpSection == "" {
+		t.Fatal("could not find cp-1 section")
+	}
+	if strings.Contains(cpSection, "k8s-preinstall") {
+		t.Error("prebaked cp-1 section should not have preinstall provisioner")
+	}
+	if !strings.Contains(cpSection, "k8s-control-plane-init") {
+		t.Error("prebaked cp-1 section missing control-plane-init provisioner")
+	}
+}
+
 func TestBuildVagrantfile_BarenodeMode(t *testing.T) {
 	trueVal := true
 	spec := &scenario.KubernetesSpec{
@@ -197,7 +245,9 @@ func extractNodeSection(vf, vmName string) string {
 			j++
 		}
 		line = strings.TrimSpace(vf[i:j])
-		if strings.HasSuffix(line, "do |node|") || strings.HasSuffix(line, "do |vb|") || strings.HasSuffix(line, "do |hv|") {
+		// Count any block opening: `... do |node|`, `do |vb|`, `do |hv|`,
+		// `do |lv|` (libvirt), `do |vmw|` (vmware), etc.
+		if strings.Contains(line, " do |") && strings.HasSuffix(line, "|") {
 			depth++
 		}
 		if line == "end" {

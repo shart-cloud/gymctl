@@ -79,7 +79,7 @@
                   "properties": {
                     "bootstrapMode": {
                       "type": "string",
-                      "enum": ["managed", "barenode"]
+                      "enum": ["managed", "barenode", "prebaked"]
                     },
                     "box": {"type": "string"},
                     "kubernetesVersion": {"type": "string"},

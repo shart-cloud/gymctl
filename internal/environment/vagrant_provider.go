@@ -15,6 +15,51 @@ import (
 
 type VagrantProvider struct{}
 
+const (
+	kubeconfigBeginMarker = "__GYMCTL_KUBECONFIG_BEGIN__"
+	kubeconfigEndMarker   = "__GYMCTL_KUBECONFIG_END__"
+)
+
+// applyVagrantBackendEnv sets VAGRANT_DEFAULT_PROVIDER for child vagrant
+// processes. Only `vagrant up` receives an explicit `--provider`; every other
+// subcommand (ssh, destroy, ...) would otherwise default to VirtualBox and, on
+// WSL, trip the "unable to use VirtualBox" guard. The runner leaves cmd.Env
+// nil, so children inherit this process's environment.
+func applyVagrantBackendEnv(providerSpec *scenario.VagrantProviderSpec) {
+	if backend, err := ResolveVagrantBackend(providerSpec); err == nil && backend != "" {
+		_ = os.Setenv("VAGRANT_DEFAULT_PROVIDER", string(backend))
+	}
+}
+
+// extractBetweenMarkers returns the substring between the first occurrence of
+// begin and the following end marker. If a marker is absent it degrades
+// gracefully (returns from begin, or the whole string).
+func extractBetweenMarkers(s, begin, end string) string {
+	i := strings.Index(s, begin)
+	if i < 0 {
+		return s
+	}
+	i += len(begin)
+	rest := s[i:]
+	if j := strings.Index(rest, end); j >= 0 {
+		return rest[:j]
+	}
+	return rest
+}
+
+// kubeconfigServerIsLoopback reports whether the kubeconfig's server URL points
+// at a loopback address (127.0.0.1 / localhost), i.e. one not reachable from
+// the host and worth rewriting.
+func kubeconfigServerIsLoopback(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "server:") {
+			return strings.Contains(trimmed, "127.0.0.1") || strings.Contains(trimmed, "localhost")
+		}
+	}
+	return false
+}
+
 func (p *VagrantProvider) Name() string {
 	return KubernetesProviderVagrant
 }
@@ -32,6 +77,7 @@ func (p *VagrantProvider) Ensure(ctx context.Context, entryDir string, spec *sce
 	if err := ValidateBackend(backend); err != nil {
 		return err
 	}
+	applyVagrantBackendEnv(providerSpec)
 
 	if state == nil {
 		return fmt.Errorf("exercise state is required")
@@ -80,6 +126,8 @@ func (p *VagrantProvider) Ensure(ctx context.Context, entryDir string, spec *sce
 }
 
 func (p *VagrantProvider) Teardown(ctx context.Context, state *ExerciseState) error {
+	applyVagrantBackendEnv(nil)
+
 	workspace, err := vagrantWorkspaceFromState(state)
 	if err != nil {
 		return err
@@ -110,6 +158,7 @@ func (p *VagrantProvider) NodeExec(ctx context.Context, state *ExerciseState, no
 	if strings.TrimSpace(script) == "" {
 		return "", fmt.Errorf("script is required")
 	}
+	applyVagrantBackendEnv(nil)
 
 	workspace, err := vagrantWorkspaceFromState(state)
 	if err != nil {
@@ -145,19 +194,31 @@ func (p *VagrantProvider) ExportKubeconfig(ctx context.Context, state *ExerciseS
 		return "", fmt.Errorf("exercise state is required")
 	}
 
-	adminConf, err := p.NodeExec(ctx, state, "cp-1", "sudo cat /etc/kubernetes/admin.conf", "30s")
+	// Wrap the read in unique markers: `vagrant ssh` interleaves provider noise
+	// on stdout (e.g. "[fog][WARNING] Unrecognized arguments: libvirt_ip_command")
+	// around the remote command's output, which would otherwise corrupt the
+	// kubeconfig. Extract only what's between the markers.
+	raw, err := p.NodeExec(ctx, state, "cp-1",
+		"echo "+kubeconfigBeginMarker+"; sudo cat /etc/kubernetes/admin.conf; echo "+kubeconfigEndMarker, "30s")
 	if err != nil {
 		return "", err
 	}
-	adminConf = strings.TrimSpace(adminConf)
+	adminConf := strings.TrimSpace(extractBetweenMarkers(raw, kubeconfigBeginMarker, kubeconfigEndMarker))
 	if adminConf == "" {
 		return "", fmt.Errorf("empty kubeconfig read from cp-1")
 	}
 
-	controlPlaneIP, _ := p.NodeExec(ctx, state, "cp-1", "hostname -I | awk '{print $1}'", "10s")
-	controlPlaneIP = strings.TrimSpace(controlPlaneIP)
-	if controlPlaneIP != "" {
-		adminConf = rewriteKubeconfigServer(adminConf, controlPlaneIP)
+	// admin.conf already targets the kubeadm advertise address — the routable
+	// private-network IP that is in the API server cert SANs. Only rewrite the
+	// server when it points at loopback (unreachable from the host); rewriting a
+	// valid advertise IP to the VM's first NIC (often the mgmt network) would
+	// break TLS because that IP is not in the cert SANs.
+	if kubeconfigServerIsLoopback(adminConf) {
+		controlPlaneIP, _ := p.NodeExec(ctx, state, "cp-1", "hostname -I | awk '{print $1}'", "10s")
+		controlPlaneIP = strings.TrimSpace(controlPlaneIP)
+		if controlPlaneIP != "" {
+			adminConf = rewriteKubeconfigServer(adminConf, controlPlaneIP)
+		}
 	}
 
 	if strings.TrimSpace(destPath) == "" {

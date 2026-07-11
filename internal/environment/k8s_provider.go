@@ -14,6 +14,11 @@ const (
 
 	VagrantBootstrapManaged  = "managed"
 	VagrantBootstrapBareNode = "barenode"
+	// VagrantBootstrapPrebaked is for Packer-baked boxes that already ship
+	// containerd + kubeadm/kubelet/kubectl + kernel/sysctl prep + pre-pulled
+	// control-plane images. It skips the (slow) preinstall provisioner and only
+	// runs the kubeadm init/join bootstrap.
+	VagrantBootstrapPrebaked = "prebaked"
 )
 
 type KubernetesProvider interface {
@@ -53,7 +58,7 @@ func ResolveVagrantBootstrapMode(spec *scenario.KubernetesSpec) string {
 		return VagrantBootstrapManaged
 	}
 	mode := strings.ToLower(strings.TrimSpace(spec.Vagrant.BootstrapMode))
-	if mode != VagrantBootstrapManaged && mode != VagrantBootstrapBareNode {
+	if mode != VagrantBootstrapManaged && mode != VagrantBootstrapBareNode && mode != VagrantBootstrapPrebaked {
 		return VagrantBootstrapManaged
 	}
 	return mode

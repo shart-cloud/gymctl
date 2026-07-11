@@ -1,0 +1,17 @@
+# Build output — large images/boxes, never committed.
+output/
+*.box
+*.img
+*.qcow2
+SHA256SUMS
+
+# Vagrant insecure keypair — fetched by build.sh, not committed (a file with a
+# "PRIVATE KEY" block trips secret scanners even though this key is public).
+vagrant_insecure_key
+vagrant_insecure_key.pub
+
+# Packer runtime
+.packer.d/
+packer_cache/
+crash.log
+*.log
