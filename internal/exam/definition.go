@@ -69,6 +69,15 @@ func builtIns() []Definition {
 		{ID: "7", Name: "Password Cracking", Weight: 12},
 	}
 
+	sec503Domains := []Domain{
+		{ID: "1", Name: "Packets and Frames", Weight: 20},
+		{ID: "2", Name: "Wireshark Deep Dive", Weight: 20},
+		{ID: "3", Name: "IDS/IPS Rules", Weight: 15},
+		{ID: "4", Name: "Traffic Analysis", Weight: 20},
+		{ID: "5", Name: "Network Forensics", Weight: 20},
+		{ID: "6", Name: "Advanced Topics", Weight: 5},
+	}
+
 	cksDomains := []Domain{
 		{ID: "cluster-setup", Name: "Cluster Setup", Weight: 15},
 		{ID: "cluster-hardening", Name: "Cluster Hardening", Weight: 15},
@@ -98,6 +107,16 @@ func builtIns() []Definition {
 			DomainOrder:     namesInOrder(gxCSDomains),
 			TrackPrefix:     "gx-cs",
 			DefaultDuration: 240,
+			DefaultBackend:  "local",
+		},
+		{
+			ID:              "sec503",
+			Name:            "SEC503 Network Monitoring & Threat Detection",
+			Domains:         sec503Domains,
+			DomainWeights:   weightsByName(sec503Domains),
+			DomainOrder:     namesInOrder(sec503Domains),
+			TrackPrefix:     "sec503",
+			DefaultDuration: 120,
 			DefaultBackend:  "local",
 		},
 		{

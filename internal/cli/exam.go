@@ -431,7 +431,9 @@ func hasFittingCandidate(bucket []scenario.CatalogEntry, remainingMinutes int, u
 }
 
 func classifyDomain(ex *scenario.Exercise, def internalexam.Definition) string {
-	if strings.HasPrefix(strings.ToLower(def.ID), "gx-") {
+	// gx-* and sec503 both map an exercise to a domain by the leading segment
+	// of its gxObjective (e.g. "1.2" -> domain "1").
+	if strings.HasPrefix(strings.ToLower(def.ID), "gx-") || strings.EqualFold(def.ID, "sec503") {
 		return classifyGXDomain(ex, def)
 	}
 	if strings.EqualFold(def.ID, "cks") {
