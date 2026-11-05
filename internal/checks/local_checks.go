@@ -117,7 +117,7 @@ func runFileCheck(check scenario.Check, workDir string) Result {
 		return result
 	}
 
-	path := check.Path
+	path := expandCheckPath(check.Path)
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(workDir, path)
 	}
@@ -196,4 +196,16 @@ func checkExpectOutput(output string, expect *scenario.ExpectOutput, result Resu
 	}
 	result.Passed = true
 	return result
+}
+
+// expandCheckPath expands $VARS (e.g. $GYM_WORKDIR) and a leading ~/ in a
+// file check path.
+func expandCheckPath(path string) string {
+	path = os.ExpandEnv(path)
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+		}
+	}
+	return path
 }

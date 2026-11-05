@@ -115,7 +115,14 @@ builds a workspace at `~/.gym/workdir/<exercise>`:
 - `artifacts/`: the task's artifacts, copied in fresh on every start.
   Answer keys (`*answer-key*`, `*.key.json`, `*.key.yaml`) are never copied.
 - `QUESTION.md`: the question, the answer format, and the list of files.
-- Anything else you create there (notes, extracted files) is kept between attempts.
+- Your output files (`answer.txt`, rules, extracted files, notes). Resuming a
+  stopped drill keeps them. A fresh attempt (`start` after completing, or
+  `reset`) moves them into `previous-attempt/`, so stale answers can't pass.
+
+Checks still run from the task directory, so they can read answer keys there.
+They find your files through `$GYM_WORKDIR`, which gymctl sets for check
+scripts. Use `"${GYM_WORKDIR:-$HOME}/answer.txt"` in `task.yaml`. `file`
+checks expand `$VARS` and `~` in `path:`.
 
 With the shell integration loaded, `start` and `reset` `cd` you into the
 workspace and export `$GYM_EXERCISE`, `$GYM_WORKDIR`, and `$PCAP` (set when the

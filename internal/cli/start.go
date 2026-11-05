@@ -167,7 +167,8 @@ func newStartCmd() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout())
 			printExerciseIntro(cmd, exercise)
 
-			if err := markStarted(exercise); err != nil {
+			fresh, err := markStarted(exercise)
+			if err != nil {
 				return err
 			}
 
@@ -183,7 +184,7 @@ func newStartCmd() *cobra.Command {
 			workDir := ""
 			switch exercise.Spec.Environment.Type {
 			case "local":
-				workDir, err = prepareLocalWorkspace(exercise, entry.Dir)
+				workDir, err = prepareLocalWorkspace(exercise, entry.Dir, fresh)
 				if err != nil {
 					return err
 				}
@@ -247,19 +248,22 @@ func printExerciseIntro(cmd *cobra.Command, exercise *scenario.Exercise) {
 	fmt.Fprintln(out, "")
 }
 
-func markStarted(exercise *scenario.Exercise) error {
+// markStarted records the start of an attempt and reports whether it is a
+// fresh attempt (as opposed to resuming an in-progress or stopped one).
+func markStarted(exercise *scenario.Exercise) (bool, error) {
 	path, err := resolveProgressFile()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	progressFile, err := progress.Load(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	entry := progressFile.Exercises[exercise.Metadata.Name]
-	if entry.Status == "" || entry.Status == "not_started" || entry.Status == "completed" {
+	fresh := entry.Status == "" || entry.Status == "not_started" || entry.Status == "completed"
+	if fresh {
 		entry.StartedAt = time.Now().UTC().Format(time.RFC3339)
 		entry.HintsUsed = 0
 		entry.Resets = 0
@@ -267,7 +271,7 @@ func markStarted(exercise *scenario.Exercise) error {
 	entry.Status = "in_progress"
 	progressFile.Exercises[exercise.Metadata.Name] = entry
 
-	return progress.Save(path, progressFile)
+	return fresh, progress.Save(path, progressFile)
 }
 
 // printWorkspaceFooter tells the user where to work and how to get back to

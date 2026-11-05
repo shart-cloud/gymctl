@@ -36,7 +36,7 @@ func TestPrepareLocalWorkspace(t *testing.T) {
 	ex.Spec.Description = "Find the thing.\nWrite it to ~/answer.txt"
 	ex.Spec.Environment.Type = "local"
 
-	workDir, err := prepareLocalWorkspace(ex, taskDir)
+	workDir, err := prepareLocalWorkspace(ex, taskDir, true)
 	if err != nil {
 		t.Fatalf("prepareLocalWorkspace: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestPrepareLocalWorkspace(t *testing.T) {
 		t.Errorf("GYM_WORKDIR = %q", env["GYM_WORKDIR"])
 	}
 
-	// A second start refreshes artifacts but keeps the user's own files.
+	// Resuming (not fresh) refreshes artifacts but keeps the user's own files.
 	notes := filepath.Join(workDir, "notes.txt")
 	if err := os.WriteFile(notes, []byte("mine"), 0o644); err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func TestPrepareLocalWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workDir, "artifacts", "capture.pcap"), []byte("tampered"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepareLocalWorkspace(ex, taskDir); err != nil {
+	if _, err := prepareLocalWorkspace(ex, taskDir, false); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(workDir, "artifacts", "capture.pcap")); string(b) != "pcap" {
@@ -118,5 +118,48 @@ func TestShellDirectivesEmit(t *testing.T) {
 	want := "unset PCAP\nexport PCAP='/tmp/it'\"'\"'s here.pcap'\ncd '/tmp/work dir'\n"
 	if string(got) != want {
 		t.Errorf("directives =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestFreshAttemptArchivesPreviousFiles(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ex := &scenario.Exercise{}
+	ex.Metadata.Name = "sec503-archive-001"
+	ex.Spec.Environment.Type = "local"
+	taskDir := t.TempDir()
+
+	workDir, err := prepareLocalWorkspace(ex, taskDir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(workDir, "answer.txt"), []byte("old=1"), 0o644)
+	_ = os.MkdirAll(filepath.Join(workDir, "extracted"), 0o755)
+
+	if _, err := prepareLocalWorkspace(ex, taskDir, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "answer.txt")); err == nil {
+		t.Error("stale answer.txt left in place for a fresh attempt")
+	}
+	for _, name := range []string{"answer.txt", "extracted"} {
+		if _, err := os.Stat(filepath.Join(workDir, "previous-attempt", name)); err != nil {
+			t.Errorf("%s not archived: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "QUESTION.md")); err != nil {
+		t.Errorf("QUESTION.md missing: %v", err)
+	}
+
+	// A second fresh attempt replaces the archive rather than nesting it.
+	_ = os.WriteFile(filepath.Join(workDir, "answer.txt"), []byte("newer=2"), 0o644)
+	if _, err := prepareLocalWorkspace(ex, taskDir, true); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(workDir, "previous-attempt", "answer.txt"))
+	if string(b) != "newer=2" {
+		t.Errorf("archive answer.txt = %q, want newer=2", b)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "previous-attempt", "previous-attempt")); err == nil {
+		t.Error("archive nested inside itself")
 	}
 }

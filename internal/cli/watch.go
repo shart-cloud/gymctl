@@ -84,9 +84,21 @@ func newWatchCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return watchDocker(ctx, cmd, entry, workDir, opts)
+				return watchDocker(ctx, cmd, entry, workDir, workDir, opts)
 			case "local":
-				return watchDocker(ctx, cmd, entry, entry.Dir, opts)
+				// Answers are written in the drill workspace; checks read the
+				// task's answer keys, so they run from the task directory.
+				workDir, err := resolveWorkDir(entry.Exercise.Metadata.Name)
+				if err != nil {
+					return err
+				}
+				if err := os.MkdirAll(workDir, 0o755); err != nil {
+					return err
+				}
+				if err := exportCheckEnv(entry.Exercise); err != nil {
+					return err
+				}
+				return watchDocker(ctx, cmd, entry, workDir, entry.Dir, opts)
 			default:
 				return watchKubernetes(ctx, cmd, entry, opts)
 			}
@@ -99,21 +111,21 @@ func newWatchCmd() *cobra.Command {
 	return cmd
 }
 
-func watchDocker(ctx context.Context, cmd *cobra.Command, entry *scenario.CatalogEntry, workDir string, opts *watchOptions) error {
+func watchDocker(ctx context.Context, cmd *cobra.Command, entry *scenario.CatalogEntry, watchDir, checkDir string, opts *watchOptions) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("create file watcher: %w", err)
 	}
 	defer watcher.Close()
 
-	// Add workDir and all existing subdirectories (fsnotify doesn't recurse automatically)
-	if err := addDirRecursive(watcher, workDir); err != nil {
-		return fmt.Errorf("watch directory %s: %w", workDir, err)
+	// Add watchDir and all existing subdirectories (fsnotify doesn't recurse automatically)
+	if err := addDirRecursive(watcher, watchDir); err != nil {
+		return fmt.Errorf("watch directory %s: %w", watchDir, err)
 	}
 
 	// Run initial check before waiting for events
 	prevPassCount := -1
-	done, prevPassCount := runChecksAndRender(ctx, cmd, entry, workDir, opts, prevPassCount)
+	done, prevPassCount := runChecksAndRender(ctx, cmd, entry, checkDir, opts, prevPassCount)
 	if done {
 		return nil
 	}
@@ -155,7 +167,7 @@ func watchDocker(ctx context.Context, cmd *cobra.Command, entry *scenario.Catalo
 			ColorDim.Fprintln(cmd.OutOrStdout(), "  watcher error")
 		case <-timerCh:
 			var done bool
-			done, prevPassCount = runChecksAndRender(ctx, cmd, entry, workDir, opts, prevPassCount)
+			done, prevPassCount = runChecksAndRender(ctx, cmd, entry, checkDir, opts, prevPassCount)
 			if done {
 				return nil
 			}

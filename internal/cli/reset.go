@@ -167,7 +167,8 @@ func newResetCmd() *cobra.Command {
 
 			// Handle work directory
 			workDir, err := resolveWorkDir(exercise.Metadata.Name)
-			if err == nil && !opts.keepWork {
+			// Local drill workspaces are archived, not wiped (see prepareLocalWorkspace).
+			if err == nil && !opts.keepWork && exercise.Spec.Environment.Type != "local" {
 				// Check if work directory exists
 				if _, err := os.Stat(workDir); err == nil {
 					// Ask for confirmation
@@ -193,7 +194,7 @@ func newResetCmd() *cobra.Command {
 			}
 
 			if exercise.Spec.Environment.Type == "local" {
-				if workDir, err = prepareLocalWorkspace(exercise, entry.Dir); err != nil {
+				if workDir, err = prepareLocalWorkspace(exercise, entry.Dir, !opts.keepWork); err != nil {
 					return err
 				}
 				if err := rememberCurrentTasksDirs(); err != nil {

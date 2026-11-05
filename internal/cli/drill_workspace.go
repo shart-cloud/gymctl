@@ -17,24 +17,34 @@ import (
 // task's artifacts in (answer keys excluded, so they can't be read while
 // solving) and writes QUESTION.md so the brief is always one `cat` away.
 // Checks still run from the task directory, so task.yaml paths like
-// artifacts/<key>.json keep working unchanged.
+// artifacts/<key>.json keep working unchanged; they find the user's output
+// files (answer.txt, rules, ...) through $GYM_WORKDIR.
 
 const (
 	workspaceArtifactsDir = "artifacts"
 	workspaceQuestionFile = "QUESTION.md"
+	workspacePreviousDir  = "previous-attempt"
 )
 
 // workspaceEnvKeys are the variables a drill exports into the user's shell.
 // They are unset before each start so values from a previous drill never leak.
 var workspaceEnvKeys = []string{"GYM_EXERCISE", "GYM_WORKDIR", "PCAP"}
 
-func prepareLocalWorkspace(exercise *scenario.Exercise, taskDir string) (string, error) {
+// prepareLocalWorkspace builds the drill workspace. A fresh attempt moves the
+// previous attempt's files into previous-attempt/ so stale answers can't pass
+// the new attempt; resuming (fresh=false) leaves them in place.
+func prepareLocalWorkspace(exercise *scenario.Exercise, taskDir string, fresh bool) (string, error) {
 	workDir, err := resolveWorkDir(exercise.Metadata.Name)
 	if err != nil {
 		return "", err
 	}
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return "", fmt.Errorf("create workspace: %w", err)
+	}
+	if fresh {
+		if err := archivePreviousAttempt(workDir); err != nil {
+			return "", err
+		}
 	}
 
 	// Refresh artifacts on every start so they always match the task and any
@@ -177,6 +187,7 @@ func renderQuestion(exercise *scenario.Exercise, workDir string) string {
 		}
 	}
 
+	b.WriteString("\nWrite answer files (answer.txt, rules, extracted files) in this directory.\n")
 	b.WriteString("\n---\n`gymctl q` re-shows this · `gymctl check` grades · `gymctl hint` costs points\n")
 	return b.String()
 }
@@ -196,4 +207,50 @@ func listWorkspaceArtifacts(workDir string) []string {
 	})
 	sort.Strings(files)
 	return files
+}
+
+// archivePreviousAttempt moves everything the user created in the workspace
+// into previous-attempt/, replacing any older archive.
+func archivePreviousAttempt(workDir string) error {
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return fmt.Errorf("read workspace: %w", err)
+	}
+	var userFiles []string
+	for _, e := range entries {
+		switch e.Name() {
+		case workspaceArtifactsDir, workspaceQuestionFile, workspacePreviousDir:
+			continue
+		}
+		userFiles = append(userFiles, e.Name())
+	}
+	if len(userFiles) == 0 {
+		return nil
+	}
+	archive := filepath.Join(workDir, workspacePreviousDir)
+	if err := os.RemoveAll(archive); err != nil {
+		return fmt.Errorf("clear %s: %w", workspacePreviousDir, err)
+	}
+	if err := os.MkdirAll(archive, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", workspacePreviousDir, err)
+	}
+	for _, name := range userFiles {
+		if err := os.Rename(filepath.Join(workDir, name), filepath.Join(archive, name)); err != nil {
+			return fmt.Errorf("archive %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// exportCheckEnv makes the drill workspace visible to check scripts, which
+// run from the task directory and read the user's files via $GYM_WORKDIR.
+func exportCheckEnv(exercise *scenario.Exercise) error {
+	if exercise.Spec.Environment.Type != "local" {
+		return nil
+	}
+	workDir, err := resolveWorkDir(exercise.Metadata.Name)
+	if err != nil {
+		return err
+	}
+	return os.Setenv("GYM_WORKDIR", workDir)
 }

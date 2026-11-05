@@ -79,6 +79,9 @@ func newCheckCmd() *cobra.Command {
 			if err := configureExerciseKubeconfigEnv(ctx, exercise); err != nil {
 				return err
 			}
+			if err := exportCheckEnv(exercise); err != nil {
+				return err
+			}
 
 			workDir := ""
 			switch exercise.Spec.Environment.Type {
