@@ -12,6 +12,11 @@ type Definition struct {
 	AllowedTracks   []string
 	DefaultDuration int
 	DefaultBackend  string
+	// ObjectiveAliases maps an exercise from another track onto this exam's
+	// domains. Keys are "track:objective" (e.g. "sec503:4.1") or
+	// "track:domain" (e.g. "sec503:1"); values are this exam's domain IDs.
+	// The exact objective key wins over the domain key.
+	ObjectiveAliases map[string]string
 }
 
 type Domain struct {
@@ -36,6 +41,24 @@ func IDs() []string {
 		ids = append(ids, def.ID)
 	}
 	return ids
+}
+
+// AliasDomainID resolves a foreign-track exercise objective to one of this
+// exam's domain IDs via ObjectiveAliases. ok is false when no alias applies.
+func (d Definition) AliasDomainID(track, objective string) (string, bool) {
+	if len(d.ObjectiveAliases) == 0 {
+		return "", false
+	}
+	track = strings.ToLower(strings.TrimSpace(track))
+	objective = strings.TrimSpace(objective)
+	if id, ok := d.ObjectiveAliases[track+":"+objective]; ok {
+		return id, true
+	}
+	domain := strings.Split(objective, ".")[0]
+	if id, ok := d.ObjectiveAliases[track+":"+domain]; ok {
+		return id, true
+	}
+	return "", false
 }
 
 func (d Definition) DomainNameByID(id string) string {
@@ -78,6 +101,35 @@ func builtIns() []Definition {
 		{ID: "6", Name: "Advanced Topics", Weight: 5},
 	}
 
+	// GX-IA: the seven objective areas published on the GIAC exam page.
+	// Weights are an even spread; GIAC does not publish per-domain weighting.
+	gxIADomains := []Domain{
+		{ID: "1", Name: "Advanced Analysis Techniques", Weight: 14},
+		{ID: "2", Name: "Application Traffic Analysis", Weight: 14},
+		{ID: "3", Name: "IDS Application and Analysis", Weight: 14},
+		{ID: "4", Name: "Malicious Traffic Analysis", Weight: 15},
+		{ID: "5", Name: "Network Forensics", Weight: 15},
+		{ID: "6", Name: "Network Traffic Analysis", Weight: 14},
+		{ID: "7", Name: "Protocol Analysis", Weight: 14},
+	}
+
+	// sec503 drills are strong GX-IA prep, so the gx-ia exam draws from both
+	// tracks. sec503 objectives are numbered by course section, not GX-IA
+	// domain; this crosswalk places each section (or specific objective) in
+	// the GX-IA domain it exercises.
+	gxIAAliases := map[string]string{
+		"sec503:1":   "7", // Packets and Frames -> Protocol Analysis
+		"sec503:2":   "2", // Wireshark Deep Dive -> Application Traffic Analysis
+		"sec503:2.1": "1", // display vs capture filters -> Advanced Analysis Techniques
+		"sec503:2.2": "1",
+		"sec503:2.9": "1", // IO graphs
+		"sec503:3":   "3", // Suricata rules -> IDS Application and Analysis
+		"sec503:4":   "4", // Traffic Analysis -> Malicious Traffic Analysis
+		"sec503:4.1": "6", // recon / scan stimulus-response -> Network Traffic Analysis
+		"sec503:5":   "5", // Network Forensics
+		"sec503:6":   "7", // IPv6 / VLAN -> Protocol Analysis
+	}
+
 	cksDomains := []Domain{
 		{ID: "cluster-setup", Name: "Cluster Setup", Weight: 15},
 		{ID: "cluster-hardening", Name: "Cluster Hardening", Weight: 15},
@@ -118,6 +170,18 @@ func builtIns() []Definition {
 			TrackPrefix:     "sec503",
 			DefaultDuration: 120,
 			DefaultBackend:  "local",
+		},
+		{
+			ID:               "gx-ia",
+			Name:             "GIAC Experienced Intrusion Analyst",
+			Domains:          gxIADomains,
+			DomainWeights:    weightsByName(gxIADomains),
+			DomainOrder:      namesInOrder(gxIADomains),
+			AllowedTracks:    []string{"gx-ia", "sec503"},
+			TrackPrefix:      "gx-ia",
+			ObjectiveAliases: gxIAAliases,
+			DefaultDuration:  240,
+			DefaultBackend:   "local",
 		},
 		{
 			ID:              "cks",
