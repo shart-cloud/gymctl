@@ -449,6 +449,9 @@ func classifyGXDomain(ex *scenario.Exercise, def internalexam.Definition) string
 	if ex.Metadata.GXObjective == "" {
 		return def.Domains[0].Name
 	}
+	if id, ok := def.AliasDomainID(ex.Metadata.Track, ex.Metadata.GXObjective); ok {
+		return def.DomainNameByID(id)
+	}
 	domainID := strings.Split(ex.Metadata.GXObjective, ".")[0]
 	return def.DomainNameByID(domainID)
 }
