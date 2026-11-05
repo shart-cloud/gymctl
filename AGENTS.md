@@ -5,7 +5,7 @@ This file is repository-specific and should override generic habits when they co
 
 ## Project Snapshot
 
-- Language: Go (`go 1.24.x`)
+- Language: Go (`go 1.26.x`)
 - Module: `gymctl`
 - Entry point: `cmd/gymctl/main.go`
 - Primary packages: `internal/cli`, `internal/checks`, `internal/environment`, `internal/scenario`, `internal/progress`

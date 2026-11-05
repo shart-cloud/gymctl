@@ -32,7 +32,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.26"
           cache: true
 
       - name: Build
@@ -44,7 +44,7 @@ jobs:
           mkdir -p dist
           EXT=""
           if [ "${GOOS}" = "windows" ]; then EXT=".exe"; fi
-          go build -o "dist/gymctl-${GOOS}-${GOARCH}${EXT}" ./cmd/gymctl
+          go build -ldflags "-X gymctl/internal/cli.Version=${GITHUB_REF_NAME}" -o "dist/gymctl-${GOOS}-${GOARCH}${EXT}" ./cmd/gymctl
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
