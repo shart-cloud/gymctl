@@ -103,7 +103,7 @@ func newStopCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "Use 'gymctl start' to resume or 'gymctl reset' to start fresh.")
 			}
 
-			return nil
+			return shellDirectives{unset: workspaceEnvKeys}.emit()
 		},
 	}
 

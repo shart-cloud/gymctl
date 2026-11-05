@@ -14,6 +14,7 @@ import (
 //  2. GYMCTL_TASKS_DIRS env var (comma-separated)
 //     GYMCTL_TASKS_DIR is also accepted as a compatibility fallback
 //  2. Local ./tasks directory (for development)
+//     then the tasks dirs the current exercise was started from
 //  3. System-wide installation at /usr/share/gymctl/tasks
 //  4. User's home directory at ~/.gym/tasks
 //  5. Bundled with binary at <binary-dir>/tasks
@@ -46,6 +47,12 @@ func resolveTasksDirectories() ([]string, error) {
 	// 3. Check local directory (development mode)
 	if _, err := os.Stat("tasks"); err == nil {
 		return []string{"tasks"}, nil
+	}
+
+	// 3b. Tasks directories the current exercise was started from, so
+	// check/hint/question work from inside a drill workspace.
+	if dirs := loadCurrentTasksDirs(); len(dirs) > 0 {
+		return dirs, nil
 	}
 
 	// 4. Check system-wide installation
@@ -229,4 +236,51 @@ Then run gymctl again.
 `, destPath, filepath.Dir(destPath))
 
 	return fmt.Errorf("manual download required")
+}
+
+const currentTasksDirsFile = "current-tasks-dirs"
+
+// rememberCurrentTasksDirs records the absolute tasks directories in use so
+// later commands can find the current exercise from any working directory.
+func rememberCurrentTasksDirs() error {
+	gymDir, err := resolveGymDir()
+	if err != nil {
+		return err
+	}
+	dirs := parseTasksDirList(tasksDir)
+	abs := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		resolved, err := filepath.Abs(dir)
+		if err != nil {
+			return fmt.Errorf("resolve tasks directory %s: %w", dir, err)
+		}
+		abs = append(abs, resolved)
+	}
+	if err := os.MkdirAll(gymDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(gymDir, currentTasksDirsFile), []byte(strings.Join(abs, "\n")+"\n"), 0o644)
+}
+
+func loadCurrentTasksDirs() []string {
+	gymDir, err := resolveGymDir()
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(gymDir, currentTasksDirsFile))
+	if err != nil {
+		return nil
+	}
+	var dirs []string
+	for _, line := range strings.Split(string(data), "\n") {
+		dir := strings.TrimSpace(line)
+		if dir == "" {
+			continue
+		}
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			return nil
+		}
+		dirs = append(dirs, dir)
+	}
+	return dirs
 }

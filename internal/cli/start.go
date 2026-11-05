@@ -155,7 +155,8 @@ func newStartCmd() *cobra.Command {
 					return err
 				}
 			case "local":
-				// Local exercises assume tools and artifacts already exist in the workspace.
+				// Tools are expected on PATH; artifacts are copied into the
+				// drill workspace below, after the attempt is recorded.
 			default:
 				return fmt.Errorf("unsupported environment type: %s", exercise.Spec.Environment.Type)
 			}
@@ -174,11 +175,18 @@ func newStartCmd() *cobra.Command {
 				return err
 			}
 
+			if err := rememberCurrentTasksDirs(); err != nil {
+				return err
+			}
+
 			// Resolve work directory based on environment type.
 			workDir := ""
 			switch exercise.Spec.Environment.Type {
 			case "local":
-				workDir = entry.Dir
+				workDir, err = prepareLocalWorkspace(exercise, entry.Dir)
+				if err != nil {
+					return err
+				}
 			default:
 				resolved, err := resolveWorkDir(exercise.Metadata.Name)
 				if err != nil {
@@ -190,23 +198,13 @@ func newStartCmd() *cobra.Command {
 				}
 			}
 
-			// Print work directory info
-			fmt.Fprintln(cmd.OutOrStdout(), "")
-			if exercise.Spec.Environment.Type == "local" {
-				fmt.Fprintf(cmd.OutOrStdout(), "Task directory: %s\n", workDir)
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "Work directory: %s\n", workDir)
-				fmt.Fprintln(cmd.OutOrStdout(), "")
-				fmt.Fprintln(cmd.OutOrStdout(), "To navigate to your work directory, run:")
-				fmt.Fprintf(cmd.OutOrStdout(), "  cd %s\n", workDir)
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), "")
+			printWorkspaceFooter(cmd, exercise, workDir)
 
 			if opts.emitCD {
 				fmt.Fprintf(cmd.OutOrStdout(), "__gymctl_cd:%s\n", workDir)
 			}
 
-			return nil
+			return enterWorkspace(ctx, exercise, workDir)
 		},
 	}
 
@@ -270,4 +268,42 @@ func markStarted(exercise *scenario.Exercise) error {
 	progressFile.Exercises[exercise.Metadata.Name] = entry
 
 	return progress.Save(path, progressFile)
+}
+
+// printWorkspaceFooter tells the user where to work and how to get back to
+// the question, adapting to whether the shell integration is active.
+func printWorkspaceFooter(cmd *cobra.Command, exercise *scenario.Exercise, workDir string) {
+	out := cmd.OutOrStdout()
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "Workspace: %s\n", workDir)
+	if exercise.Spec.Environment.Type == "local" {
+		if pcap := localWorkspaceEnv(exercise)["PCAP"]; pcap != "" {
+			fmt.Fprintf(out, "$PCAP:     %s\n", pcap)
+		}
+		ColorDim.Fprintln(out, "Lost the question? `gymctl q` or `cat QUESTION.md`.")
+	}
+	if !shellIntegrationActive() {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "To work there, run:")
+		fmt.Fprintf(out, "  cd %s", shellQuoteValue(workDir))
+		if exercise.Spec.Environment.Type == "local" {
+			fmt.Fprint(out, " && eval \"$(gymctl env)\"")
+		}
+		fmt.Fprintln(out)
+		ColorDim.Fprintln(out, "Tip: add eval \"$(gymctl shell-init)\" to your shell rc to do this automatically.")
+	}
+	fmt.Fprintln(out)
+}
+
+// enterWorkspace asks the shell integration (if active) to cd into the
+// workspace and export the exercise's environment.
+func enterWorkspace(ctx context.Context, exercise *scenario.Exercise, workDir string) error {
+	if !shellIntegrationActive() {
+		return nil
+	}
+	env, _, err := collectExerciseEnv(ctx, exercise)
+	if err != nil {
+		env = map[string]string{"GYM_EXERCISE": exercise.Metadata.Name}
+	}
+	return shellDirectives{unset: workspaceEnvKeys, export: env, cd: workDir}.emit()
 }

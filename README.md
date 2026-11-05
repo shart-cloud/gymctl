@@ -103,6 +103,26 @@ gymctl exam cka --backend vagrant --duration-minutes 120 --seed 42
 | `gymctl diagnose` | Check Docker/Kubernetes/network prerequisites |
 | `gymctl recover [name]` | Recover from corrupted state |
 | `gymctl exam cka` | Generate a timed random CKA-style Kubernetes exam playlist (supports `--cka-only` and `--domain-balanced`) |
+| `gymctl question [name]` (`q`) | Re-show the current exercise's question, elapsed time, workspace and `$PCAP` |
+| `gymctl env [name]` | Print `export` lines for the exercise (`eval "$(gymctl env)"`) |
+| `gymctl shell-init` | Print the shell integration; add `eval "$(gymctl shell-init)"` to `~/.bashrc` / `~/.zshrc` |
+
+### Drill workspaces (local exercises)
+
+`gymctl start` on a `local` exercise (analysis drills such as the SEC503 track)
+builds a workspace at `~/.gym/workdir/<exercise>`:
+
+- `artifacts/`: the task's artifacts, copied in fresh on every start.
+  Answer keys (`*answer-key*`, `*.key.json`, `*.key.yaml`) are never copied.
+- `QUESTION.md`: the question, the answer format, and the list of files.
+- Anything else you create there (notes, extracted files) is kept between attempts.
+
+With the shell integration loaded, `start` and `reset` `cd` you into the
+workspace and export `$GYM_EXERCISE`, `$GYM_WORKDIR`, and `$PCAP` (set when the
+task has exactly one capture). `stop` unsets them. In a new terminal, run
+`eval "$(gymctl env)"` to get them back. `check`, `hint` and `q` work from inside
+the workspace, because gymctl remembers which tasks directory the current
+exercise came from.
 
 ---
 

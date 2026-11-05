@@ -153,7 +153,7 @@ func newResetCmd() *cobra.Command {
 					return err
 				}
 			case "local":
-				// Reset only touches progress state for local exercises.
+				// The drill workspace is rebuilt below, after the optional wipe.
 			default:
 				return fmt.Errorf("unsupported environment type: %s", exercise.Spec.Environment.Type)
 			}
@@ -192,13 +192,19 @@ func newResetCmd() *cobra.Command {
 				}
 			}
 
+			if exercise.Spec.Environment.Type == "local" {
+				if workDir, err = prepareLocalWorkspace(exercise, entry.Dir); err != nil {
+					return err
+				}
+				if err := rememberCurrentTasksDirs(); err != nil {
+					return err
+				}
+			}
+
 			fmt.Fprintln(cmd.OutOrStdout(), "")
 			fmt.Fprintln(cmd.OutOrStdout(), "Exercise reset successfully.")
-			fmt.Fprintf(cmd.OutOrStdout(), "Work directory: %s\n", workDir)
-			fmt.Fprintln(cmd.OutOrStdout(), "")
-			fmt.Fprintln(cmd.OutOrStdout(), "To navigate to your work directory, run:")
-			fmt.Fprintf(cmd.OutOrStdout(), "  cd %s\n", workDir)
-			return nil
+			printWorkspaceFooter(cmd, exercise, workDir)
+			return enterWorkspace(ctx, exercise, workDir)
 		},
 	}
 

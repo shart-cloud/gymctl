@@ -20,6 +20,9 @@ func collectExerciseEnv(ctx context.Context, exercise *scenario.Exercise) (map[s
 	}
 
 	envVars["GYM_EXERCISE"] = exercise.Metadata.Name
+	for key, value := range localWorkspaceEnv(exercise) {
+		envVars[key] = value
+	}
 
 	if exercise.Spec.Environment.Type != "kubernetes" || exercise.Spec.Environment.Kubernetes == nil {
 		return envVars, warnings, nil
