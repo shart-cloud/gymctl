@@ -261,7 +261,7 @@ func markStarted(exercise *scenario.Exercise) error {
 	}
 
 	entry := progressFile.Exercises[exercise.Metadata.Name]
-	if entry.Status == "" || entry.Status == "not_started" {
+	if entry.Status == "" || entry.Status == "not_started" || entry.Status == "completed" {
 		entry.StartedAt = time.Now().UTC().Format(time.RFC3339)
 		entry.HintsUsed = 0
 		entry.Resets = 0

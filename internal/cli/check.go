@@ -298,6 +298,9 @@ func markCompleted(exercise *scenario.Exercise) error {
 	}
 
 	entry := progressFile.Exercises[exercise.Metadata.Name]
+	if entry.Status == "completed" {
+		return nil
+	}
 	entry.Status = "completed"
 	entry.CompletedAt = time.Now().UTC().Format(time.RFC3339)
 	baseScore := defaultPoints(exercise.Spec.Points)

@@ -122,6 +122,9 @@ func markStopped(exercise *scenario.Exercise) error {
 	}
 
 	entry := progressFile.Exercises[exercise.Metadata.Name]
+	if entry.Status == "completed" {
+		return nil
+	}
 	entry.Status = "stopped"
 	// Keep the StartedAt time to track when it was started
 	progressFile.Exercises[exercise.Metadata.Name] = entry

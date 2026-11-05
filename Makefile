@@ -11,7 +11,7 @@ INSTALL_SHARE_DIR ?= /usr/share/gymctl
 
 # Version info
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS=-ldflags "-X main.Version=$(VERSION)"
+LDFLAGS=-ldflags "-X gymctl/internal/cli.Version=$(VERSION)"
 
 # Default target
 .PHONY: all

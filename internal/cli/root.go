@@ -8,9 +8,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Version is set at build time via -ldflags "-X gymctl/internal/cli.Version=...".
+var Version = "dev"
+
 var rootCmd = &cobra.Command{
-	Use:   "gymctl",
-	Short: "Gymctl orchestrates Jerry's chaos gym exercises",
+	Use:     "gymctl",
+	Short:   "Gymctl orchestrates Jerry's chaos gym exercises",
+	Version: Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if outputJSON {
 			outputFormat = "json"

@@ -212,15 +212,23 @@ func recoverExercise(cmd *cobra.Command, exerciseName, backupPath string, force 
 
 	// 2. Reset progress
 	spinner.Start("Resetting progress")
-	progressPath, _ := resolveProgressFile()
-	progressFile, _ := progress.Load(progressPath)
-
-	if progressFile.Exercises != nil {
-		status := progressFile.Exercises[exerciseName]
-		status.Status = "not_started"
-		status.HintsUsed = 0
-		progressFile.Exercises[exerciseName] = status
-		progress.Save(progressPath, progressFile)
+	progressPath, err := resolveProgressFile()
+	if err != nil {
+		spinner.Fail("Resetting progress")
+		return fmt.Errorf("resolve progress file: %w", err)
+	}
+	progressFile, err := progress.Load(progressPath)
+	if err != nil {
+		spinner.Fail("Resetting progress")
+		return fmt.Errorf("load progress (fix or move %s): %w", progressPath, err)
+	}
+	status := progressFile.Exercises[exerciseName]
+	status.Status = "not_started"
+	status.HintsUsed = 0
+	progressFile.Exercises[exerciseName] = status
+	if err := progress.Save(progressPath, progressFile); err != nil {
+		spinner.Fail("Resetting progress")
+		return err
 	}
 	spinner.Success("Progress reset")
 

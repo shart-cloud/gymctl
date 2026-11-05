@@ -56,9 +56,24 @@ func Save(path string, file *File) error {
 		return fmt.Errorf("create progress dir: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".progress-*.yaml")
+	if err != nil {
 		return fmt.Errorf("write progress: %w", err)
 	}
-
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write progress: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write progress: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write progress: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("write progress: %w", err)
+	}
 	return nil
 }

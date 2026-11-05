@@ -98,7 +98,8 @@ func newTaskNewCmd() *cobra.Command {
 }
 
 func inferTaskEnvironment(track string) string {
-	if strings.HasPrefix(strings.ToLower(track), "gx-") {
+	track = strings.ToLower(track)
+	if strings.HasPrefix(track, "gx-") || strings.HasPrefix(track, "sec") {
 		return "local"
 	}
 	return "kubernetes"
@@ -138,7 +139,7 @@ func nextTaskName(trackDir, prefix string) (string, error) {
 func renderTaskSkeleton(name, track, title, objective, envType string) string {
 	metadataObjective := ""
 	if objective != "" {
-		metadataObjective = fmt.Sprintf("  gxObjective: %s\n", objective)
+		metadataObjective = fmt.Sprintf("  gxObjective: %q\n", objective)
 	}
 
 	return fmt.Sprintf(`apiVersion: gymctl/v1
